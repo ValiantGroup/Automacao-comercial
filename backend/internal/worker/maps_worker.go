@@ -238,6 +238,7 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 	// Enqueue enrichment tasks
 	linkedInPayload, _ := json.Marshal(map[string]string{"company_id": company.ID.String()})
 	webPayload, _ := json.Marshal(map[string]string{"company_id": company.ID.String()})
+	hunterPayload, _ := json.Marshal(map[string]string{"company_id": company.ID.String()})
 
 	if _, err := w.client.Enqueue(
 		asynq.NewTask(TaskEnrichLinkedIn, linkedInPayload),
@@ -253,6 +254,14 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 		asynq.Queue("enrichment"),
 	); err != nil {
 		slog.Error("Enqueue web enrichment failed", "company_id", company.ID, "error", err)
+	}
+
+	if _, err := w.client.Enqueue(
+		asynq.NewTask(TaskEnrichHunter, hunterPayload),
+		asynq.MaxRetry(3),
+		asynq.Queue("enrichment"),
+	); err != nil {
+		slog.Error("Enqueue hunter enrichment failed", "company_id", company.ID, "error", err)
 	}
 
 	return nil
