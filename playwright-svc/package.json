@@ -1,0 +1,21 @@
+{
+  "name": "playwright-svc",
+  "version": "1.0.0",
+  "description": "Playwright scraping microservice for Valiant Prospector",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "playwright": "^1.44.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2"
+  }
+}
