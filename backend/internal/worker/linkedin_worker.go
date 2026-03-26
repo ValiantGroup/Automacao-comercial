@@ -43,12 +43,12 @@ type linkedInPayload struct {
 }
 
 type apolloPerson struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Title     string `json:"title"`
-	Email     string `json:"email"`
-	Phone     string `json:"phone"`
-	LinkedInURL string `json:"linkedin_url"`
+	ID                 string  `json:"id"`
+	FirstName          string  `json:"first_name"`
+	LastNameObfuscated string  `json:"last_name_obfuscated"`
+	Title              *string `json:"title"`
+	HasEmail           bool    `json:"has_email"`
+	HasDirectPhone     string  `json:"has_direct_phone"`
 }
 
 func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
@@ -87,12 +87,19 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 			return err
 		}
 
+		name := strings.TrimSpace(person.FirstName + " " + person.LastNameObfuscated)
+		
+		titleVal := ""
+		if person.Title != nil {
+			titleVal = strings.TrimSpace(*person.Title)
+		}
+
 		// Classify role with AI
 		normalizedRole := "OTHER"
-		if person.Title != "" && w.aiClient != nil {
+		if titleVal != "" && w.aiClient != nil {
 			raw, err := w.aiClient.Complete(ctx,
 				"You are a role classifier. Return only valid JSON.",
-				ai.BuildRoleClassificationPrompt(person.Title))
+				ai.BuildRoleClassificationPrompt(titleVal))
 			if err == nil {
 				normalizedRole, _ = ai.ParseRole(raw)
 			}
@@ -100,16 +107,16 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 
 		_, err := w.queries.CreateStakeholder(ctx, db.CreateStakeholderParams{
 			CompanyID:      companyID,
-			Name:           person.Name,
+			Name:           name,
 			NormalizedRole: strPtr(normalizedRole),
-			RawTitle:       strIfNotEmpty(person.Title),
-			LinkedInURL:    strIfNotEmpty(person.LinkedInURL),
-			Email:          strIfNotEmpty(person.Email),
-			Phone:          strIfNotEmpty(person.Phone),
+			RawTitle:       strIfNotEmpty(titleVal),
+			LinkedInURL:    nil,
+			Email:          nil,
+			Phone:          nil,
 			Source:         strPtr("apollo"),
 		})
 		if err != nil {
-			slog.Error("Create stakeholder failed", "name", person.Name, "error", err)
+			slog.Error("Create stakeholder failed", "name", name, "error", err)
 		}
 	}
 
@@ -128,8 +135,7 @@ func (w *linkedInWorker) searchApollo(ctx context.Context, company db.Company) (
 	}
 
 	payload := map[string]interface{}{
-		"q_organization_name": company.Name,
-		"organization_domains": []string{domain},
+		"q_organization_domains_list": []string{domain},
 		"person_titles": []string{
 			"CEO", "CTO", "COO", "CFO",
 			"Head Comercial", "Head de Vendas", "Head de TI",
@@ -140,11 +146,13 @@ func (w *linkedInWorker) searchApollo(ctx context.Context, company db.Company) (
 	}
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.apollo.io/v1/mixed_people/search", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.apollo.io/api/v1/mixed_people/api_search", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("accept", "application/json")
+	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("x-api-key", w.cfg.ApolloAPIKey)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -155,7 +163,18 @@ func (w *linkedInWorker) searchApollo(ctx context.Context, company db.Company) (
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("apollo API %d: %s", resp.StatusCode, string(b))
+		switch resp.StatusCode {
+		case 401:
+			return nil, fmt.Errorf("apollo API 401 Unauthorized: Invalid or missing master API key: %s", string(b))
+		case 403:
+			return nil, fmt.Errorf("apollo API 403 Forbidden: Missing master API key or not enough credits: %s", string(b))
+		case 422:
+			return nil, fmt.Errorf("apollo API 422 Unprocessable Entity: Invalid search payload: %s", string(b))
+		case 429:
+			return nil, fmt.Errorf("apollo API 429 Too Many Requests: Rate limit exceeded: %s", string(b))
+		default:
+			return nil, fmt.Errorf("apollo API error %d: %s", resp.StatusCode, string(b))
+		}
 	}
 
 	var result struct {
