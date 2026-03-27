@@ -11,22 +11,22 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-const (
-	openAIBaseURL = "https://api.openai.com/v1"
-	modelGPT4o    = "gpt-4o"
-	modelEmbed    = "text-embedding-3-small"
-)
-
-// Client wraps the OpenAI API.
+// Client wraps an OpenAI-compatible API.
 type Client struct {
-	apiKey     string
-	httpClient *fasthttp.Client
+	apiKey      string
+	baseURL     string
+	model       string
+	embedModel  string
+	httpClient  *fasthttp.Client
 }
 
-// NewClient creates a new OpenAI client.
-func NewClient(apiKey string) *Client {
+// NewClient creates a new AI client.
+func NewClient(apiKey, baseURL, model, embedModel string) *Client {
 	return &Client{
-		apiKey: apiKey,
+		apiKey:     apiKey,
+		baseURL:    baseURL,
+		model:      model,
+		embedModel: embedModel,
 		httpClient: &fasthttp.Client{
 			ReadTimeout:         90 * time.Second,
 			WriteTimeout:        90 * time.Second,
@@ -35,6 +35,7 @@ func NewClient(apiKey string) *Client {
 		},
 	}
 }
+
 
 // ─── Chat Completion ──────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ type chatResponse struct {
 // Complete sends a prompt to GPT-4o and returns the raw string response.
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	req := chatRequest{
-		Model: modelGPT4o,
+		Model: c.model,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -91,7 +92,7 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 	defer fasthttp.ReleaseRequest(fasthttpReq)
 	defer fasthttp.ReleaseResponse(fasthttpResp)
 
-	fasthttpReq.SetRequestURI(openAIBaseURL + "/chat/completions")
+	fasthttpReq.SetRequestURI(c.baseURL + "/chat/completions")
 	fasthttpReq.Header.SetMethod(fasthttp.MethodPost)
 	fasthttpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	fasthttpReq.Header.Set("Content-Type", "application/json")
@@ -123,7 +124,7 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 		return "", fmt.Errorf("openai returned no choices")
 	}
 
-	slog.Debug("OpenAI completion", "model", modelGPT4o, "response_len", len(chatResp.Choices[0].Message.Content))
+	slog.Debug("OpenAI completion", "model", c.model, "response_len", len(chatResp.Choices[0].Message.Content))
 	return chatResp.Choices[0].Message.Content, nil
 }
 
@@ -146,7 +147,7 @@ type embedResponse struct {
 // Embed generates a text embedding vector using text-embedding-3-small.
 func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	req := embedRequest{
-		Model: modelEmbed,
+		Model: c.embedModel,
 		Input: text,
 	}
 
@@ -164,7 +165,7 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	defer fasthttp.ReleaseRequest(fasthttpReq)
 	defer fasthttp.ReleaseResponse(fasthttpResp)
 
-	fasthttpReq.SetRequestURI(openAIBaseURL + "/embeddings")
+	fasthttpReq.SetRequestURI(c.baseURL + "/embeddings")
 	fasthttpReq.Header.SetMethod(fasthttp.MethodPost)
 	fasthttpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	fasthttpReq.Header.Set("Content-Type", "application/json")

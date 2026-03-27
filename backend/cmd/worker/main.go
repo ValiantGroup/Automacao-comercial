@@ -53,7 +53,7 @@ func main() {
 
 	// Dependencies
 	queries := db.NewPool(pool)
-	aiClient := ai.NewClient(cfg.OpenAIAPIKey)
+	aiClient := ai.NewClient(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.OpenAIModel, cfg.OpenAIEmbedModel)
 	scraperClient := scraper.NewClient(cfg.PlaywrightSvcURL)
 	evolutionClient := outreach.NewEvolutionClient(cfg.EvolutionAPIURL, cfg.EvolutionAPIKey, "valiant")
 	sendgridClient := outreach.NewSendGridClient(cfg.SendGridAPIKey, cfg.SendGridFromEmail)

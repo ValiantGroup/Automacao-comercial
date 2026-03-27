@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -40,14 +41,25 @@ type WebsiteResult struct {
 
 func (c *Client) ScrapeWebsite(ctx context.Context, url string) (WebsiteResult, error) {
 	var result WebsiteResult
-	body, err := json.Marshal(map[string]string{"url": url})
-	if err != nil {
-		return result, fmt.Errorf("marshal website payload: %w", err)
+	candidates := normalizeWebsiteCandidates(url)
+	if len(candidates) == 0 {
+		return result, fmt.Errorf("scrape website: empty url")
 	}
-	if err := c.post(ctx, "/scrape/website", body, &result); err != nil {
-		return result, fmt.Errorf("scrape website %s: %w", url, err)
+
+	var lastErr error
+	for _, candidate := range candidates {
+		body, err := json.Marshal(map[string]string{"url": candidate})
+		if err != nil {
+			return result, fmt.Errorf("marshal website payload: %w", err)
+		}
+		if err := c.post(ctx, "/scrape/website", body, &result); err == nil {
+			return result, nil
+		} else {
+			lastErr = err
+		}
 	}
-	return result, nil
+
+	return result, fmt.Errorf("scrape website %s: %w", url, lastErr)
 }
 
 // ─── Reclame Aqui ─────────────────────────────────────────────────────────────
@@ -126,4 +138,36 @@ func (c *Client) post(ctx context.Context, path string, body []byte, out interfa
 	}
 
 	return json.Unmarshal(resp.Body(), out)
+}
+
+func normalizeWebsiteCandidates(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	appendUnique := func(v string, out *[]string) {
+		if v == "" || seen[v] {
+			return
+		}
+		seen[v] = true
+		*out = append(*out, v)
+	}
+
+	result := make([]string, 0, 3)
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		appendUnique(raw, &result)
+		if strings.HasPrefix(raw, "https://") {
+			appendUnique("http://"+strings.TrimPrefix(raw, "https://"), &result)
+		}
+		if strings.HasPrefix(raw, "http://") {
+			appendUnique("https://"+strings.TrimPrefix(raw, "http://"), &result)
+		}
+		return result
+	}
+
+	appendUnique("https://"+raw, &result)
+	appendUnique("http://"+raw, &result)
+	return result
 }

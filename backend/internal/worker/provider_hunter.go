@@ -57,9 +57,14 @@ func (p *hunterStakeholderProvider) Find(ctx context.Context, company db.Company
 			name = "Unknown Contact"
 		}
 
+		rawTitle := strings.TrimSpace(email.Position)
+		if rawTitle == "" {
+			rawTitle = strings.TrimSpace(email.Department)
+		}
+
 		candidates = append(candidates, StakeholderCandidate{
 			Name:     name,
-			RawTitle: strIfNotEmpty(strings.TrimSpace(email.Position)),
+			RawTitle: strIfNotEmpty(rawTitle),
 			Email:    strIfNotEmpty(strings.TrimSpace(email.Value)),
 			Source:   "hunter",
 		})

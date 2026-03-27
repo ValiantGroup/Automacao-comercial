@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"os"
+	"strings"
 )
 
 // Config holds all application configuration loaded from environment variables.
@@ -18,7 +19,10 @@ type Config struct {
 	CORSAllowedOrigins string
 
 	// OpenAI
-	OpenAIAPIKey string
+	OpenAIAPIKey     string
+	OpenAIBaseURL    string
+	OpenAIModel      string
+	OpenAIEmbedModel string
 
 	// Google Maps
 	GoogleMapsAPIKey string
@@ -53,12 +57,39 @@ type Config struct {
 // Load reads environment variables and returns a populated Config.
 // Critical variables must be provided at startup.
 func Load() *Config {
+	openAIAPIKey := getEnv("OPENAI_API_KEY", "")
+	openAIBaseURL := getEnv("OPENAI_BASE_URL", "")
+	openAIModel := getEnv("OPENAI_MODEL", "")
+	openAIEmbedModel := getEnv("OPENAI_EMBED_MODEL", "")
+
+	// Groq uses OpenAI-compatible routes but requires its own base URL.
+	if openAIBaseURL == "" {
+		openAIBaseURL = "https://api.openai.com/v1"
+		if strings.HasPrefix(openAIAPIKey, "gsk_") {
+			openAIBaseURL = "https://api.groq.com/openai/v1"
+		}
+	}
+
+	if openAIModel == "" {
+		openAIModel = "gpt-4o"
+		if strings.HasPrefix(openAIAPIKey, "gsk_") {
+			openAIModel = "llama-3.3-70b-versatile"
+		}
+	}
+
+	if openAIEmbedModel == "" {
+		openAIEmbedModel = "text-embedding-3-small"
+	}
+
 	cfg := &Config{
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
 		RedisURL:             getEnv("REDIS_URL", "redis://localhost:6379"),
 		JWTSecret:            getEnv("JWT_SECRET", ""),
 		CORSAllowedOrigins:   getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001"),
-		OpenAIAPIKey:         getEnv("OPENAI_API_KEY", ""),
+		OpenAIAPIKey:         openAIAPIKey,
+		OpenAIBaseURL:        openAIBaseURL,
+		OpenAIModel:          openAIModel,
+		OpenAIEmbedModel:     openAIEmbedModel,
 		GoogleMapsAPIKey:     getEnv("GOOGLE_MAPS_API_KEY", ""),
 		LinkedInClientID:     getEnv("LINKEDIN_CLIENT_ID", ""),
 		LinkedInClientSecret: getEnv("LINKEDIN_CLIENT_SECRET", ""),
@@ -88,6 +119,8 @@ func Load() *Config {
 	}
 	if cfg.OpenAIAPIKey == "" {
 		slog.Warn("OPENAI_API_KEY not set — AI features will fail")
+	} else if strings.HasPrefix(cfg.OpenAIAPIKey, "gsk_") {
+		slog.Info("Detected Groq API key; using OpenAI-compatible configuration", "base_url", cfg.OpenAIBaseURL, "model", cfg.OpenAIModel)
 	}
 	if cfg.GoogleMapsAPIKey == "" {
 		slog.Warn("GOOGLE_MAPS_API_KEY not set — prospecting will fail")

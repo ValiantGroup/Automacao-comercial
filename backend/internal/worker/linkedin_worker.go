@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -82,14 +83,16 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 			titleVal = strings.TrimSpace(*candidate.RawTitle)
 		}
 
-		// Classify role with AI
-		normalizedRole := "OTHER"
-		if titleVal != "" && w.aiClient != nil {
+		// Prefer deterministic classification so roles are still useful when AI is unstable.
+		normalizedRole := classifyNormalizedRole(titleVal, ptrToString(candidate.Email))
+		if normalizedRole == "OTHER" && titleVal != "" && w.aiClient != nil {
 			raw, err := w.aiClient.Complete(ctx,
 				"You are a role classifier. Return only valid JSON.",
 				ai.BuildRoleClassificationPrompt(titleVal))
 			if err == nil {
-				normalizedRole, _ = ai.ParseRole(raw)
+				if role, parseErr := ai.ParseRole(raw); parseErr == nil {
+					normalizedRole = role
+				}
 			}
 		}
 
@@ -135,7 +138,9 @@ func (w *linkedInWorker) maybeEnqueueAnalysis(ctx context.Context, companyID uui
 			asynq.Unique(30*time.Second),
 			asynq.ProcessIn(5*time.Second), // small delay for web worker to finish
 		); err != nil {
-			slog.Error("Enqueue AI analyze failed", "company_id", companyID, "error", err)
+			if !errors.Is(err, asynq.ErrDuplicateTask) {
+				slog.Error("Enqueue AI analyze failed", "company_id", companyID, "error", err)
+			}
 		}
 	}
 }

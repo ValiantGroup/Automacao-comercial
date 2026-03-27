@@ -21,4 +21,4 @@ CMD ["/bin/worker"]
 # ─── Migration runner ─────────────────────────────────────────────────────────
 FROM base AS migrate
 RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.1
-CMD ["migrate", "-path", "./migrations", "-database", "$DATABASE_URL", "up"]
+CMD migrate -path ./migrations -database "$DATABASE_URL" up

@@ -122,6 +122,7 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 	params := url.Values{
 		"query":  {query},
 		"radius": {fmt.Sprintf("%d", radiusMeters)},
+		"key":    {w.cfg.GoogleMapsAPIKey},
 	}
 
 	var allPlaces []mapsPlace
@@ -144,7 +145,6 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 
 		req.SetRequestURI(reqURL)
 		req.Header.SetMethod(fasthttp.MethodGet)
-		req.Header.Set("X-Goog-Api-Key", w.cfg.GoogleMapsAPIKey)
 		req.Header.Set("Accept", "application/json")
 
 		err := w.httpClient.DoTimeout(req, resp, 30*time.Second)
@@ -187,6 +187,14 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 	if err == nil && existing.ID.String() != "" {
 		slog.Debug("Duplicate place, skipping", "place_id", place.PlaceID, "name", place.Name)
 		return nil
+	}
+
+	// Skip results that are just localities, neighborhoods, or administrative areas
+	for _, t := range place.Types {
+		if t == "locality" || t == "sublocality" || t == "neighborhood" || t == "administrative_area_level_1" || t == "administrative_area_level_2" {
+			slog.Debug("Skipping location-type result", "name", place.Name, "type", t)
+			return nil
+		}
 	}
 
 	// Fetch full details
@@ -285,6 +293,7 @@ func (w *mapsWorker) fetchDetails(ctx context.Context, placeID string) (*mapsDet
 	params := url.Values{
 		"place_id": {placeID},
 		"fields":   {"name,formatted_phone_number,website,formatted_address,rating,user_ratings_total,address_components,geometry,types"},
+		"key":      {w.cfg.GoogleMapsAPIKey},
 	}
 	reqURL := "https://maps.googleapis.com/maps/api/place/details/json?" + params.Encode()
 
@@ -299,7 +308,6 @@ func (w *mapsWorker) fetchDetails(ctx context.Context, placeID string) (*mapsDet
 
 	req.SetRequestURI(reqURL)
 	req.Header.SetMethod(fasthttp.MethodGet)
-	req.Header.Set("X-Goog-Api-Key", w.cfg.GoogleMapsAPIKey)
 	req.Header.Set("Accept", "application/json")
 
 	err := w.httpClient.DoTimeout(req, resp, 30*time.Second)
