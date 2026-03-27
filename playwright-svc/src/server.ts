@@ -17,12 +17,36 @@ const USER_AGENTS = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
 ];
 
+const UNSUPPORTED_HOST_SUFFIXES = [
+  'instagram.com',
+  'facebook.com',
+  'whatsapp.com',
+  'api.whatsapp.com',
+  'wa.me',
+  'linktr.ee',
+  'tiktok.com',
+  'youtube.com',
+  'maps.google.com',
+  'dguests.com',
+];
+
+type WebsiteResponse = {
+  title: string;
+  description: string;
+  text_content: string;
+  technologies: string[];
+  links: string[];
+  source: 'playwright' | 'http_fallback' | 'skipped';
+  skipped_reason?: string;
+};
+
 // Browser pool
 const POOL_SIZE = parseInt(process.env.BROWSER_POOL_SIZE || '5', 10);
 const browserPool: Browser[] = [];
 let poolInitialized = false;
+let poolIdx = 0;
 
-async function initPool() {
+async function initPool(): Promise<void> {
   if (poolInitialized) return;
   poolInitialized = true;
 
@@ -30,7 +54,6 @@ async function initPool() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   };
-
   if (PROXY_URL) {
     launchOptions.proxy = { server: PROXY_URL };
   }
@@ -42,21 +65,22 @@ async function initPool() {
   console.log(`Browser pool initialized (${POOL_SIZE} browsers)`);
 }
 
-let poolIdx = 0;
+function randomUA(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
 async function getPage(ua: string): Promise<{ page: Page; context: BrowserContext }> {
   const browser = browserPool[poolIdx % POOL_SIZE];
   poolIdx++;
+
   const context = await browser.newContext({
     userAgent: ua,
     viewport: { width: 1280, height: 800 },
+    ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
   return { page, context };
-}
-
-function randomUA(): string {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
 function isPrivateIPv4(ip: string): boolean {
@@ -103,52 +127,115 @@ async function ensurePublicURL(rawURL: string): Promise<URL> {
   if (records.length === 0) {
     throw new Error('hostname not resolvable');
   }
-
   for (const record of records) {
     if ((record.family === 4 && isPrivateIPv4(record.address)) || (record.family === 6 && isPrivateIPv6(record.address))) {
       throw new Error('hostname resolves to private address');
     }
   }
-
   return parsed;
 }
 
-// ─── Health ────────────────────────────────────────────────────────────────
+function hostIsUnsupported(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return UNSUPPORTED_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
 
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', pool_size: browserPool.length });
-});
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
 
-// ─── Scrape Website ────────────────────────────────────────────────────────
+function normalizeSpace(input: string): string {
+  return input.replace(/\s+/g, ' ').trim();
+}
 
-app.post('/scrape/website', async (req: Request, res: Response) => {
-  const { url } = req.body as { url: string };
-  if (!url) return res.status(400).json({ error: 'url required' });
+function extractMetaDescription(html: string): string {
+  const m = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i);
+  if (m?.[1]) return normalizeSpace(decodeHtmlEntities(m[1]));
+  const m2 = html.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
+  return m2?.[1] ? normalizeSpace(decodeHtmlEntities(m2[1])) : '';
+}
 
-  let targetURL: URL;
-  try {
-    targetURL = await ensurePublicURL(url);
-  } catch (err: any) {
-    return res.status(400).json({ error: err.message || 'invalid url' });
+function stripHtmlToText(html: string): string {
+  return normalizeSpace(
+    decodeHtmlEntities(
+      html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+    )
+  );
+}
+
+function extractLinks(html: string, baseURL: URL): string[] {
+  const links: string[] = [];
+  const seen = new Set<string>();
+  const re = /<a[^>]*href=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null = re.exec(html);
+  while (match) {
+    try {
+      const abs = new URL(match[1], baseURL).toString();
+      if ((abs.startsWith('http://') || abs.startsWith('https://')) && !seen.has(abs)) {
+        seen.add(abs);
+        links.push(abs);
+      }
+    } catch {
+      // ignore malformed links
+    }
+    if (links.length >= 20) break;
+    match = re.exec(html);
   }
+  return links;
+}
 
+function detectTechnologiesFromContent(content: string): string[] {
+  const techPatterns: Record<string, RegExp> = {
+    React: /react/i,
+    'Vue.js': /vue/i,
+    Angular: /angular/i,
+    'Next.js': /next/i,
+    WordPress: /wp-content|wp-includes/i,
+    Shopify: /shopify/i,
+    jQuery: /jquery/i,
+    Bootstrap: /bootstrap/i,
+    Tailwind: /tailwind/i,
+    'Google Analytics': /google-analytics|gtag/i,
+    HubSpot: /hubspot/i,
+    Intercom: /intercom/i,
+    Hotjar: /hotjar/i,
+  };
+
+  const out: string[] = [];
+  for (const [tech, pattern] of Object.entries(techPatterns)) {
+    if (pattern.test(content)) out.push(tech);
+  }
+  return out;
+}
+
+async function scrapeWebsiteWithPlaywright(targetURL: URL): Promise<WebsiteResponse> {
   const { page, context } = await getPage(randomUA());
   try {
     await page.goto(targetURL.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    const title = await page.title();
-    const description = await page.$eval(
-      'meta[name="description"]',
-      (el) => el.getAttribute('content') || '',
-    ).catch(() => '');
+    const title = normalizeSpace(await page.title());
+    const description = await page
+      .$eval('meta[name="description"]', (el) => (el.getAttribute('content') || '').trim())
+      .catch(() => '');
 
     const textContent = await page.evaluate(() => {
       const body = document.body;
+      if (!body) return '';
       const elements = body.querySelectorAll('p, h1, h2, h3, li');
       return Array.from(elements)
-        .map((el) => el.textContent?.trim())
+        .map((el) => el.textContent?.trim() || '')
         .filter(Boolean)
-        .slice(0, 50)
+        .slice(0, 120)
         .join(' ');
     });
 
@@ -156,51 +243,139 @@ app.post('/scrape/website', async (req: Request, res: Response) => {
       Array.from(document.querySelectorAll('a[href]'))
         .map((a) => (a as HTMLAnchorElement).href)
         .filter((h) => h.startsWith('http'))
-        .slice(0, 20),
+        .slice(0, 20)
     );
 
-    // Detect technologies via meta tags and script srcs
-    const technologies: string[] = await page.evaluate(() => {
-      const techs: string[] = [];
-      const scripts = Array.from(document.querySelectorAll('script[src]')).map(
-        (s) => (s as HTMLScriptElement).src,
-      );
-      const techPatterns: Record<string, RegExp> = {
-        'React': /react/i,
+    const technologies = await page.evaluate(() => {
+      const html = document.documentElement?.outerHTML || '';
+      const patterns: Record<string, RegExp> = {
+        React: /react/i,
         'Vue.js': /vue/i,
-        'Angular': /angular/i,
+        Angular: /angular/i,
         'Next.js': /next/i,
-        'WordPress': /wp-content|wp-includes/i,
-        'Shopify': /shopify/i,
-        'jQuery': /jquery/i,
-        'Bootstrap': /bootstrap/i,
-        'Tailwind': /tailwind/i,
+        WordPress: /wp-content|wp-includes/i,
+        Shopify: /shopify/i,
+        jQuery: /jquery/i,
+        Bootstrap: /bootstrap/i,
+        Tailwind: /tailwind/i,
         'Google Analytics': /google-analytics|gtag/i,
-        'HubSpot': /hubspot/i,
-        'Intercom': /intercom/i,
-        'Hotjar': /hotjar/i,
+        HubSpot: /hubspot/i,
+        Intercom: /intercom/i,
+        Hotjar: /hotjar/i,
       };
-      for (const [tech, pattern] of Object.entries(techPatterns)) {
-        if (scripts.some((s) => pattern.test(s)) || pattern.test(document.head.innerHTML)) {
-          techs.push(tech);
-        }
+      const out: string[] = [];
+      for (const [tech, pattern] of Object.entries(patterns)) {
+        if (pattern.test(html)) out.push(tech);
       }
-      return techs;
+      return out;
     });
 
-    return res.json({ title, description, text_content: textContent.slice(0, 2000), technologies, links });
-  } catch (err: any) {
-    console.error('Website scrape error:', err.message);
-    return res.status(500).json({ error: 'website scrape failed' });
+    return {
+      title,
+      description: normalizeSpace(description),
+      text_content: normalizeSpace(textContent).slice(0, 4000),
+      technologies,
+      links,
+      source: 'playwright',
+    };
   } finally {
     await context.close();
   }
+}
+
+async function scrapeWebsiteWithHTTPFallback(targetURL: URL): Promise<WebsiteResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+
+  try {
+    const res = await fetch(targetURL.toString(), {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'user-agent': randomUA(),
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`http status ${res.status}`);
+    }
+
+    const html = await res.text();
+    const finalURL = new URL(res.url || targetURL.toString());
+
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const title = titleMatch?.[1] ? normalizeSpace(decodeHtmlEntities(titleMatch[1])) : '';
+    const description = extractMetaDescription(html);
+    const textContent = stripHtmlToText(html).slice(0, 4000);
+    const links = extractLinks(html, finalURL);
+    const technologies = detectTechnologiesFromContent(html);
+
+    return {
+      title,
+      description,
+      text_content: textContent,
+      technologies,
+      links,
+      source: 'http_fallback',
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Health
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok', pool_size: browserPool.length });
 });
 
-// ─── Scrape Reclame Aqui ──────────────────────────────────────────────────
+// Scrape website
+app.post('/scrape/website', async (req: Request, res: Response) => {
+  const { url } = req.body as { url?: string };
+  if (!url) return res.status(400).json({ error: 'url required' });
 
+  let targetURL: URL;
+  try {
+    targetURL = await ensurePublicURL(url);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'invalid url';
+    return res.status(400).json({ error: msg });
+  }
+
+  if (hostIsUnsupported(targetURL.hostname)) {
+    const skipped: WebsiteResponse = {
+      title: '',
+      description: '',
+      text_content: '',
+      technologies: [],
+      links: [],
+      source: 'skipped',
+      skipped_reason: 'unsupported_host',
+    };
+    return res.json(skipped);
+  }
+
+  try {
+    const result = await scrapeWebsiteWithPlaywright(targetURL);
+    return res.json(result);
+  } catch (playwrightErr: unknown) {
+    const playwrightMsg = playwrightErr instanceof Error ? playwrightErr.message : 'unknown error';
+    console.warn(`Playwright scrape failed for ${targetURL.toString()}: ${playwrightMsg}`);
+
+    try {
+      const fallbackResult = await scrapeWebsiteWithHTTPFallback(targetURL);
+      return res.json(fallbackResult);
+    } catch (fallbackErr: unknown) {
+      const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : 'unknown error';
+      console.error(`HTTP fallback failed for ${targetURL.toString()}: ${fallbackMsg}`);
+      return res.status(500).json({ error: 'website scrape failed' });
+    }
+  }
+});
+
+// Scrape Reclame Aqui
 app.post('/scrape/reclame-aqui', async (req: Request, res: Response) => {
-  const { company_name } = req.body as { company_name: string };
+  const { company_name } = req.body as { company_name?: string };
   if (!company_name) return res.status(400).json({ error: 'company_name required' });
 
   const { page, context } = await getPage(randomUA());
@@ -216,66 +391,68 @@ app.post('/scrape/reclame-aqui', async (req: Request, res: Response) => {
       return res.json({ found: false, score: 0, solution_rate: 0, complaints_count: 0, summary: '' });
     }
 
-    const score = await page.evaluate(() => {
-      const el = document.querySelector('[data-testid="company-score"]');
-      return el ? parseFloat(el.textContent?.replace(',', '.') || '0') : 0;
-    }).catch(() => 0);
+    const score = await page
+      .evaluate(() => {
+        const el = document.querySelector('[data-testid="company-score"]');
+        return el ? parseFloat((el.textContent || '0').replace(',', '.')) : 0;
+      })
+      .catch(() => 0);
 
-    const complaintsCount = await page.evaluate(() => {
-      const el = document.querySelector('[data-testid="complaints-count"]');
-      return el ? parseInt(el.textContent?.replace(/\D/g, '') || '0', 10) : 0;
-    }).catch(() => 0);
-
-    const summary = `Score: ${score}/10, ${complaintsCount} reclamações`;
+    const complaintsCount = await page
+      .evaluate(() => {
+        const el = document.querySelector('[data-testid="complaints-count"]');
+        return el ? parseInt((el.textContent || '0').replace(/\D/g, ''), 10) : 0;
+      })
+      .catch(() => 0);
 
     return res.json({
       found: true,
       score,
       solution_rate: score / 10,
       complaints_count: complaintsCount,
-      summary,
+      summary: `Score: ${score}/10, ${complaintsCount} reclamacoes`,
     });
-  } catch (err: any) {
-    console.error('Reclame Aqui scrape error:', err.message);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'unknown error';
+    console.warn(`Reclame Aqui scrape error (${company_name}): ${msg}`);
     return res.json({ found: false, score: 0, solution_rate: 0, complaints_count: 0, summary: '' });
   } finally {
     await context.close();
   }
 });
 
-// ─── Google Search ────────────────────────────────────────────────────────
-
+// Google search
 app.post('/scrape/google-search', async (req: Request, res: Response) => {
-  const { query, limit = 5 } = req.body as { query: string; limit: number };
+  const { query, limit = 5 } = req.body as { query?: string; limit?: number };
   if (!query) return res.status(400).json({ error: 'query required' });
 
   const { page, context } = await getPage(randomUA());
   try {
-    const searchURL = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${limit}`;
+    const lim = Math.max(1, Math.min(limit ?? 5, 10));
+    const searchURL = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${lim}`;
     await page.goto(searchURL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    const results = await page.evaluate((lim: number) => {
+    const results = await page.evaluate((maxCount: number) => {
       const items = document.querySelectorAll('div.g');
       return Array.from(items)
-        .slice(0, lim)
+        .slice(0, maxCount)
         .map((item) => ({
           title: item.querySelector('h3')?.textContent || '',
-          url: (item.querySelector('a') as HTMLAnchorElement)?.href || '',
+          url: (item.querySelector('a') as HTMLAnchorElement | null)?.href || '',
           snippet: item.querySelector('.VwiC3b')?.textContent || '',
         }))
         .filter((r) => r.title && r.url);
-    }, limit);
+    }, lim);
 
     return res.json({ results });
-  } catch (err: any) {
-    console.error('Google search error:', err.message);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'unknown error';
+    console.warn(`Google search error (${query}): ${msg}`);
     return res.status(500).json({ error: 'google search failed' });
   } finally {
     await context.close();
   }
 });
-
-// ─── Start ────────────────────────────────────────────────────────────────
 
 initPool()
   .then(() => {
@@ -283,12 +460,11 @@ initPool()
       console.log(`Playwright service listening on port ${PORT}`);
     });
   })
-  .catch((err) => {
+  .catch((err: unknown) => {
     console.error('Failed to initialize browser pool:', err);
     process.exit(1);
   });
 
-// Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Shutting down playwright-svc...');
   for (const browser of browserPool) {

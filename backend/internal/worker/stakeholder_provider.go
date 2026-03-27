@@ -31,11 +31,11 @@ type stakeholderProviderRegistry struct {
 func newStakeholderProviderRegistry(cfg *config.Config) *stakeholderProviderRegistry {
 	providers := make([]StakeholderProvider, 0, 2)
 
-	if cfg.ApolloAPIKey != "" {
-		providers = append(providers, newApolloStakeholderProvider(cfg.ApolloAPIKey))
-	}
 	if cfg.HunterAPIKey != "" {
 		providers = append(providers, newHunterStakeholderProvider(cfg.HunterAPIKey))
+	}
+	if cfg.ApolloAPIKey != "" {
+		providers = append(providers, newApolloStakeholderProvider(cfg.ApolloAPIKey))
 	}
 
 	return &stakeholderProviderRegistry{providers: providers}
@@ -50,6 +50,11 @@ func (r *stakeholderProviderRegistry) FindWithFallback(ctx context.Context, comp
 	for _, provider := range r.providers {
 		candidates, err := provider.Find(ctx, company)
 		if err != nil {
+			// Apollo free plan can return API_INACCESSIBLE on every request.
+			// Treat this as "provider unavailable" without polluting logs.
+			if strings.Contains(strings.ToUpper(err.Error()), "API_INACCESSIBLE") {
+				continue
+			}
 			errs = append(errs, fmt.Sprintf("%s: %v", provider.Name(), err))
 			continue
 		}

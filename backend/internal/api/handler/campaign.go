@@ -50,7 +50,6 @@ func (h *CampaignHandler) Create(c *fiber.Ctx) error {
 		RadiusKM        int32    `json:"radius_km"`
 		DailyLimit      int32    `json:"daily_limit"`
 		AutoSend        bool     `json:"auto_send"`
-		AIPromptContext string   `json:"ai_prompt_context"`
 		Channels        []string `json:"channels"`
 	}
 	if err := c.BodyParser(&body); err != nil {
@@ -85,7 +84,7 @@ func (h *CampaignHandler) Create(c *fiber.Ctx) error {
 		RadiusKM:        body.RadiusKM,
 		DailyLimit:      body.DailyLimit,
 		AutoSend:        body.AutoSend,
-		AIPromptContext: body.AIPromptContext,
+		AIPromptContext: "",
 		Channels:        channelsJSON,
 		CreatedBy:       createdBy,
 	})
@@ -112,7 +111,6 @@ func (h *CampaignHandler) Update(c *fiber.Ctx) error {
 		Name            *string   `json:"name"`
 		DailyLimit      *int32    `json:"daily_limit"`
 		AutoSend        *bool     `json:"auto_send"`
-		AIPromptContext *string   `json:"ai_prompt_context"`
 		Channels        []string  `json:"channels"`
 	}
 	if err := c.BodyParser(&body); err != nil {
@@ -128,9 +126,6 @@ func (h *CampaignHandler) Update(c *fiber.Ctx) error {
 	}
 	if body.AutoSend != nil {
 		campaign.AutoSend = *body.AutoSend
-	}
-	if body.AIPromptContext != nil {
-		campaign.AIPromptContext = *body.AIPromptContext
 	}
 	if len(body.Channels) > 0 {
 		channelsJSON, marshalErr := json.Marshal(body.Channels)

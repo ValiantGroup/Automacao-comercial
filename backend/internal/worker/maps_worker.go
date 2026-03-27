@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/time/rate"
@@ -18,10 +19,10 @@ import (
 )
 
 type mapsWorker struct {
-	cfg     *config.Config
-	queries *db.Queries
-	client  *asynq.Client
-	limiter *rate.Limiter
+	cfg        *config.Config
+	queries    *db.Queries
+	client     *asynq.Client
+	limiter    *rate.Limiter
 	httpClient *fasthttp.Client
 }
 
@@ -48,13 +49,13 @@ type ProspectPayload struct {
 }
 
 type mapsPlace struct {
-	PlaceID         string   `json:"place_id"`
-	Name            string   `json:"name"`
-	FormattedAddress string  `json:"formatted_address"`
-	Rating          float32  `json:"rating"`
-	UserRatingsTotal int     `json:"user_ratings_total"`
-	Types           []string `json:"types"`
-	Geometry        struct {
+	PlaceID          string   `json:"place_id"`
+	Name             string   `json:"name"`
+	FormattedAddress string   `json:"formatted_address"`
+	Rating           float32  `json:"rating"`
+	UserRatingsTotal int      `json:"user_ratings_total"`
+	Types            []string `json:"types"`
+	Geometry         struct {
 		Location struct {
 			Lat float64 `json:"lat"`
 			Lng float64 `json:"lng"`
@@ -64,16 +65,16 @@ type mapsPlace struct {
 
 type mapsDetailsResult struct {
 	Result struct {
-		PlaceID              string `json:"place_id"`
-		Name                 string `json:"name"`
-		FormattedPhoneNumber string `json:"formatted_phone_number"`
-		Website              string `json:"website"`
-		FormattedAddress     string `json:"formatted_address"`
+		PlaceID              string  `json:"place_id"`
+		Name                 string  `json:"name"`
+		FormattedPhoneNumber string  `json:"formatted_phone_number"`
+		Website              string  `json:"website"`
+		FormattedAddress     string  `json:"formatted_address"`
 		Rating               float32 `json:"rating"`
-		UserRatingsTotal     int    `json:"user_ratings_total"`
+		UserRatingsTotal     int     `json:"user_ratings_total"`
 		AddressComponents    []struct {
-			LongName  string   `json:"long_name"`
-			Types     []string `json:"types"`
+			LongName string   `json:"long_name"`
+			Types    []string `json:"types"`
 		} `json:"address_components"`
 		Geometry struct {
 			Location struct {
@@ -107,7 +108,6 @@ func (w *mapsWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		if err := w.limiter.Wait(ctx); err != nil {
 			return err
 		}
-
 		if err := w.processPlace(ctx, place, p); err != nil {
 			slog.Error("Process place failed", "place_id", place.PlaceID, "error", err)
 			continue
@@ -147,8 +147,7 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 		req.Header.SetMethod(fasthttp.MethodGet)
 		req.Header.Set("Accept", "application/json")
 
-		err := w.httpClient.DoTimeout(req, resp, 30*time.Second)
-		if err != nil {
+		if err := w.httpClient.DoTimeout(req, resp, 30*time.Second); err != nil {
 			return nil, err
 		}
 		if resp.StatusCode() >= fasthttp.StatusBadRequest {
@@ -156,40 +155,35 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 		}
 
 		var result struct {
-			Results   []mapsPlace `json:"results"`
-			NextPage  string      `json:"next_page_token"`
-			Status    string      `json:"status"`
+			Results  []mapsPlace `json:"results"`
+			NextPage string      `json:"next_page_token"`
+			Status   string      `json:"status"`
 		}
-
 		if err := json.Unmarshal(resp.Body(), &result); err != nil {
 			return nil, err
 		}
-
 		if result.Status != "OK" && result.Status != "ZERO_RESULTS" {
 			return nil, fmt.Errorf("maps API status: %s", result.Status)
 		}
 
 		allPlaces = append(allPlaces, result.Results...)
-
 		if result.NextPage == "" || len(allPlaces) >= 60 {
 			break
 		}
 		pageToken = result.NextPage
-		time.Sleep(2 * time.Second) // required delay before next page token is valid
+		time.Sleep(2 * time.Second)
 	}
 
 	return allPlaces, nil
 }
 
 func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p ProspectPayload) error {
-	// Check for duplicate by place ID
 	existing, err := w.queries.GetCompanyByPlaceID(ctx, place.PlaceID)
 	if err == nil && existing.ID.String() != "" {
 		slog.Debug("Duplicate place, skipping", "place_id", place.PlaceID, "name", place.Name)
 		return nil
 	}
 
-	// Skip results that are just localities, neighborhoods, or administrative areas
 	for _, t := range place.Types {
 		if t == "locality" || t == "sublocality" || t == "neighborhood" || t == "administrative_area_level_1" || t == "administrative_area_level_2" {
 			slog.Debug("Skipping location-type result", "name", place.Name, "type", t)
@@ -197,7 +191,6 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 		}
 	}
 
-	// Fetch full details
 	details, err := w.fetchDetails(ctx, place.PlaceID)
 	if err != nil {
 		slog.Warn("Could not fetch place details, using basic data", "place_id", place.PlaceID, "error", err)
@@ -218,7 +211,6 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 	if details != nil {
 		phone = details.Result.FormattedPhoneNumber
 		website = details.Result.Website
-		// Extract city/state from address components
 		for _, comp := range details.Result.AddressComponents {
 			for _, t := range comp.Types {
 				if t == "administrative_area_level_2" {
@@ -231,7 +223,7 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 		}
 	}
 
-	createParams := db.CreateCompanyParams{
+	company, err := w.queries.CreateCompany(ctx, db.CreateCompanyParams{
 		GooglePlaceID:      strPtr(place.PlaceID),
 		Name:               place.Name,
 		Phone:              strIfNotEmpty(phone),
@@ -245,27 +237,33 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 		GoogleRating:       &rating,
 		GoogleReviewsCount: &reviewCount,
 		Niche:              strPtr(p.Niche),
-	}
-
-	company, err := w.queries.CreateCompany(ctx, createParams)
+	})
 	if err != nil {
 		return fmt.Errorf("create company: %w", err)
 	}
 
 	slog.Info("Company created", "id", company.ID, "name", company.Name)
 
-	// Link to campaign
 	if p.CampaignID != "" {
-		// campaignID uuid parse ignored for brevity — in prod parse from string
-		_ = p.CampaignID
+		campaignID, parseErr := uuid.Parse(p.CampaignID)
+		if parseErr != nil {
+			slog.Warn("Invalid campaign id in prospect payload", "campaign_id", p.CampaignID, "error", parseErr)
+		} else if err := w.queries.AddCompanyToCampaign(ctx, campaignID, company.ID); err != nil {
+			slog.Warn("Failed to link company to campaign", "company_id", company.ID, "campaign_id", campaignID, "error", err)
+		}
 	}
 
-	// Enqueue enrichment tasks
-	linkedInPayload, err := json.Marshal(map[string]string{"company_id": company.ID.String()})
+	linkedInPayload, err := json.Marshal(map[string]string{
+		"company_id":  company.ID.String(),
+		"campaign_id": p.CampaignID,
+	})
 	if err != nil {
 		return fmt.Errorf("marshal linkedin payload: %w", err)
 	}
-	webPayload, err := json.Marshal(map[string]string{"company_id": company.ID.String()})
+	webPayload, err := json.Marshal(map[string]string{
+		"company_id":  company.ID.String(),
+		"campaign_id": p.CampaignID,
+	})
 	if err != nil {
 		return fmt.Errorf("marshal web payload: %w", err)
 	}
@@ -310,8 +308,7 @@ func (w *mapsWorker) fetchDetails(ctx context.Context, placeID string) (*mapsDet
 	req.Header.SetMethod(fasthttp.MethodGet)
 	req.Header.Set("Accept", "application/json")
 
-	err := w.httpClient.DoTimeout(req, resp, 30*time.Second)
-	if err != nil {
+	if err := w.httpClient.DoTimeout(req, resp, 30*time.Second); err != nil {
 		return nil, err
 	}
 	if resp.StatusCode() >= fasthttp.StatusBadRequest {
@@ -324,8 +321,6 @@ func (w *mapsWorker) fetchDetails(ctx context.Context, placeID string) (*mapsDet
 	}
 	return &result, nil
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func strPtr(s string) *string { return &s }
 

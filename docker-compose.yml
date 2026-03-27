@@ -11,7 +11,6 @@ volumes:
   evolution_data:
   traefik_letsencrypt:
 
-
 services:
   traefik:
     image: traefik:v3.2

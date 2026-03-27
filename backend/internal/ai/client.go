@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -13,11 +14,11 @@ import (
 
 // Client wraps an OpenAI-compatible API.
 type Client struct {
-	apiKey      string
-	baseURL     string
-	model       string
-	embedModel  string
-	httpClient  *fasthttp.Client
+	apiKey     string
+	baseURL    string
+	model      string
+	embedModel string
+	httpClient *fasthttp.Client
 }
 
 // NewClient creates a new AI client.
@@ -35,7 +36,6 @@ func NewClient(apiKey, baseURL, model, embedModel string) *Client {
 		},
 	}
 }
-
 
 // ─── Chat Completion ──────────────────────────────────────────────────────────
 
@@ -78,6 +78,22 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 		MaxTokens:   2000,
 	}
 
+	content, err := c.doChatCompletion(ctx, req)
+	if err == nil {
+		return content, nil
+	}
+
+	// Some providers reject strict JSON mode occasionally. Retry once without response_format.
+	if strings.Contains(err.Error(), "json_validate_failed") {
+		req.ResponseFormat = nil
+		req.Temperature = 0.2
+		return c.doChatCompletion(ctx, req)
+	}
+
+	return "", err
+}
+
+func (c *Client) doChatCompletion(ctx context.Context, req chatRequest) (string, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)

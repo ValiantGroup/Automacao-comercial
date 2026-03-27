@@ -15,7 +15,7 @@ type Config struct {
 	RedisURL string
 
 	// Auth
-	JWTSecret string
+	JWTSecret          string
 	CORSAllowedOrigins string
 
 	// OpenAI
@@ -23,6 +23,7 @@ type Config struct {
 	OpenAIBaseURL    string
 	OpenAIModel      string
 	OpenAIEmbedModel string
+	AIGlobalContext  string
 
 	// Google Maps
 	GoogleMapsAPIKey string
@@ -90,6 +91,7 @@ func Load() *Config {
 		OpenAIBaseURL:        openAIBaseURL,
 		OpenAIModel:          openAIModel,
 		OpenAIEmbedModel:     openAIEmbedModel,
+		AIGlobalContext:      getEnv("AI_GLOBAL_CONTEXT", "Valiant Group: parceiro estrategico em digitalizacao e automacao de processos para empresas B2B."),
 		GoogleMapsAPIKey:     getEnv("GOOGLE_MAPS_API_KEY", ""),
 		LinkedInClientID:     getEnv("LINKEDIN_CLIENT_ID", ""),
 		LinkedInClientSecret: getEnv("LINKEDIN_CLIENT_SECRET", ""),

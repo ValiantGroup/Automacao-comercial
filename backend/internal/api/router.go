@@ -30,6 +30,7 @@ func RegisterRoutes(
 	campaignHandler := handler.NewCampaignHandler(queries, asynqClient)
 	outreachHandler := handler.NewOutreachHandler(queries, asynqClient, hub)
 	dashboardHandler := handler.NewDashboardHandler(queries)
+	settingsHandler := handler.NewSettingsHandler(queries, cfg)
 
 	// Public routes
 	auth := app.Group("/api/auth", middleware.RateLimit(10))
@@ -68,4 +69,10 @@ func RegisterRoutes(
 
 	// Dashboard
 	api.Get("/dashboard/stats", dashboardHandler.Stats)
+
+	// Settings
+	settings := api.Group("/settings")
+	settings.Get("/", settingsHandler.Get)
+	settings.Patch("/", settingsHandler.Update)
+	settings.Get("/diagnostics", settingsHandler.Diagnostics)
 }

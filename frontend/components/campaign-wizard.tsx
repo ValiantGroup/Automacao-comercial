@@ -9,7 +9,7 @@ interface Props {
   onCreated: () => void;
 }
 
-const STEPS = ['Configuração', 'Envio', 'Contexto IA', 'Revisão'];
+const STEPS = ['Configuracao', 'Envio', 'Revisao'];
 
 interface FormData {
   name: string;
@@ -19,7 +19,6 @@ interface FormData {
   daily_limit: number;
   auto_send: boolean;
   channels: string[];
-  ai_prompt_context: string;
 }
 
 const DEFAULT_FORM: FormData = {
@@ -30,7 +29,6 @@ const DEFAULT_FORM: FormData = {
   daily_limit: 50,
   auto_send: false,
   channels: ['whatsapp'],
-  ai_prompt_context: '',
 };
 
 export function CampaignWizard({ onClose, onCreated }: Props) {
@@ -39,7 +37,7 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  function update(key: keyof FormData, value: any) {
+  function update(key: keyof FormData, value: string | number | boolean | string[]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -61,8 +59,9 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
         body: JSON.stringify(form),
       });
       onCreated();
-    } catch (e: any) {
-      setError(e.message || 'Erro ao criar campanha');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erro ao criar campanha';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -71,7 +70,6 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-surface-card border border-surface-border rounded-2xl w-full max-w-lg shadow-2xl animate-fade-in">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border">
           <h2 className="font-bold text-white">Nova Campanha</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
@@ -79,7 +77,6 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
           </button>
         </div>
 
-        {/* Progress */}
         <div className="flex gap-1 px-6 py-3">
           {STEPS.map((s, i) => (
             <div key={s} className="flex-1 flex flex-col items-center gap-1">
@@ -89,26 +86,25 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
           ))}
         </div>
 
-        {/* Content */}
         <div className="px-6 py-4 space-y-4 min-h-56">
           {step === 0 && (
             <>
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Nome da campanha</label>
-                <input className="input" placeholder="Ex: Restaurantes SP Q3 2024" value={form.name} onChange={(e) => update('name', e.target.value)} />
+                <input className="input" placeholder="Ex: Bares SP Q2" value={form.name} onChange={(e) => update('name', e.target.value)} />
               </div>
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Nicho</label>
-                <input className="input" placeholder="Ex: Restaurantes, Clínicas, E-commerce..." value={form.niche} onChange={(e) => update('niche', e.target.value)} />
+                <input className="input" placeholder="Ex: Bares, Clinicas, E-commerce" value={form.niche} onChange={(e) => update('niche', e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">Cidade</label>
-                  <input className="input" placeholder="São Paulo" value={form.city} onChange={(e) => update('city', e.target.value)} />
+                  <input className="input" placeholder="Sao Paulo" value={form.city} onChange={(e) => update('city', e.target.value)} />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-300 mb-1">Raio (km)</label>
-                  <input className="input" type="number" min="1" max="100" value={form.radius_km} onChange={(e) => update('radius_km', parseInt(e.target.value))} />
+                  <input className="input" type="number" min="1" max="100" value={form.radius_km} onChange={(e) => update('radius_km', parseInt(e.target.value || '10', 10))} />
                 </div>
               </div>
             </>
@@ -117,23 +113,23 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
           {step === 1 && (
             <>
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Limite diário de envios</label>
-                <input className="input" type="number" min="1" max="500" value={form.daily_limit} onChange={(e) => update('daily_limit', parseInt(e.target.value))} />
+                <label className="block text-sm text-gray-300 mb-1">Limite diario de envios</label>
+                <input className="input" type="number" min="1" max="500" value={form.daily_limit} onChange={(e) => update('daily_limit', parseInt(e.target.value || '50', 10))} />
               </div>
               <div>
                 <label className="block text-sm text-gray-300 mb-2">Canais de envio</label>
                 <div className="flex gap-2">
                   {['whatsapp', 'email'].map((ch) => (
                     <button key={ch} onClick={() => toggleChannel(ch)} className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${form.channels.includes(ch) ? 'bg-brand/20 border-brand text-brand' : 'border-surface-border text-gray-400 hover:text-white'}`}>
-                      {ch === 'whatsapp' ? '📱 WhatsApp' : '✉️ Email'}
+                      {ch === 'whatsapp' ? 'WhatsApp' : 'Email'}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="flex items-center justify-between py-2 px-3 bg-surface rounded-lg border border-surface-border">
                 <div>
-                  <p className="text-sm font-medium text-white">Envio automático</p>
-                  <p className="text-xs text-gray-400">Enviar mensagens sem aprovação manual</p>
+                  <p className="text-sm font-medium text-white">Envio automatico</p>
+                  <p className="text-xs text-gray-400">Enviar sem aprovacao manual</p>
                 </div>
                 <button onClick={() => update('auto_send', !form.auto_send)} className={`relative w-11 h-6 rounded-full transition-colors ${form.auto_send ? 'bg-brand' : 'bg-surface-border'}`}>
                   <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.auto_send ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -143,32 +139,19 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
           )}
 
           {step === 2 && (
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Contexto estratégico para IA</label>
-              <p className="text-xs text-gray-500 mb-2">Explique o que a Valiant oferece e a proposta de valor para esse nicho específico</p>
-              <textarea
-                className="input min-h-40 resize-none"
-                placeholder="Ex: A Valiant Group cria sistemas de gestão para restaurantes que reduzem desperdício e aumentam a margem em até 20%..."
-                value={form.ai_prompt_context}
-                onChange={(e) => update('ai_prompt_context', e.target.value)}
-              />
-            </div>
-          )}
-
-          {step === 3 && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-400">Confirme os detalhes antes de criar:</p>
+              <p className="text-sm text-gray-400">Confirme os detalhes:</p>
               {[
                 ['Nome', form.name],
                 ['Nicho', form.niche],
                 ['Cidade', `${form.city} (+${form.radius_km}km)`],
-                ['Limite diário', `${form.daily_limit} envios`],
+                ['Limite diario', `${form.daily_limit} envios`],
                 ['Canais', form.channels.join(', ')],
-                ['Auto-envio', form.auto_send ? 'Sim' : 'Não'],
+                ['Auto-envio', form.auto_send ? 'Sim' : 'Nao'],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between text-sm">
                   <span className="text-gray-400">{k}</span>
-                  <span className="text-white font-medium">{v || '—'}</span>
+                  <span className="text-white font-medium">{v || '-'}</span>
                 </div>
               ))}
               {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">{error}</div>}
@@ -176,14 +159,13 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-surface-border">
-          <button onClick={() => step > 0 ? setStep(step - 1) : onClose()} className="btn-outline flex items-center gap-1.5 text-sm">
+          <button onClick={() => (step > 0 ? setStep(step - 1) : onClose())} className="btn-outline flex items-center gap-1.5 text-sm">
             <ChevronLeft className="w-4 h-4" /> {step === 0 ? 'Cancelar' : 'Voltar'}
           </button>
           {step < STEPS.length - 1 ? (
             <button onClick={() => setStep(step + 1)} className="btn-primary flex items-center gap-1.5 text-sm" disabled={step === 0 && (!form.name || !form.niche || !form.city)}>
-              Próximo <ChevronRight className="w-4 h-4" />
+              Proximo <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
             <button onClick={submit} className="btn-primary flex items-center gap-1.5 text-sm" disabled={loading}>

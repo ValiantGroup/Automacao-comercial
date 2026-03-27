@@ -142,6 +142,12 @@ type PipelineEvent struct {
 	CreatedAt time.Time       `json:"created_at" db:"created_at"`
 }
 
+type SystemSetting struct {
+	Key       string    `json:"key" db:"key"`
+	ValueText string    `json:"value_text" db:"value_text"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
 // ─── Params ───────────────────────────────────────────────────────────────────
 
 type CreateCompanyParams struct {
@@ -573,6 +579,27 @@ func (q *Queries) UpsertIntelligence(ctx context.Context, p UpsertIntelligencePa
 }
 
 // ─── Pipeline Events ──────────────────────────────────────────────────────────
+
+// --- System Settings ---------------------------------------------------------
+
+func (q *Queries) GetSystemSetting(ctx context.Context, key string) (SystemSetting, error) {
+	row := q.db.QueryRow(ctx, `SELECT key, value_text, updated_at FROM system_settings WHERE key=$1`, key)
+	var s SystemSetting
+	err := row.Scan(&s.Key, &s.ValueText, &s.UpdatedAt)
+	return s, err
+}
+
+func (q *Queries) UpsertSystemSetting(ctx context.Context, key, valueText string) (SystemSetting, error) {
+	row := q.db.QueryRow(ctx,
+		`INSERT INTO system_settings (key, value_text, updated_at)
+		 VALUES ($1,$2,NOW())
+		 ON CONFLICT (key) DO UPDATE SET value_text=EXCLUDED.value_text, updated_at=NOW()
+		 RETURNING key, value_text, updated_at`,
+		key, valueText)
+	var s SystemSetting
+	err := row.Scan(&s.Key, &s.ValueText, &s.UpdatedAt)
+	return s, err
+}
 
 func (q *Queries) CreatePipelineEvent(ctx context.Context, companyID uuid.UUID, eventType string, payload json.RawMessage) (PipelineEvent, error) {
 	row := q.db.QueryRow(ctx,

@@ -19,27 +19,28 @@ import (
 )
 
 type linkedInWorker struct {
-	cfg      *config.Config
-	queries  *db.Queries
-	aiClient *ai.Client
-	client   *asynq.Client
-	limiter  *rate.Limiter
+	cfg              *config.Config
+	queries          *db.Queries
+	aiClient         *ai.Client
+	client           *asynq.Client
+	limiter          *rate.Limiter
 	providerRegistry *stakeholderProviderRegistry
 }
 
 func newLinkedInWorker(cfg *config.Config, queries *db.Queries, aiClient *ai.Client, client *asynq.Client) *linkedInWorker {
 	return &linkedInWorker{
-		cfg:      cfg,
-		queries:  queries,
-		aiClient: aiClient,
-		client:   client,
-		limiter:  rate.NewLimiter(rate.Every(time.Second/5), 2), // 5 rps
+		cfg:              cfg,
+		queries:          queries,
+		aiClient:         aiClient,
+		client:           client,
+		limiter:          rate.NewLimiter(rate.Every(time.Second/5), 2), // 5 rps
 		providerRegistry: newStakeholderProviderRegistry(cfg),
 	}
 }
 
 type linkedInPayload struct {
-	CompanyID string `json:"company_id"`
+	CompanyID  string `json:"company_id"`
+	CampaignID string `json:"campaign_id,omitempty"`
 }
 
 func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
@@ -114,19 +115,22 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 	slog.Info("LinkedIn enrichment done", "company_id", companyID, "stakeholders", len(candidates), "provider", providerUsed)
 
 	// Check if web enrichment is also done so we can trigger AI analysis
-	w.maybeEnqueueAnalysis(ctx, companyID)
+	w.maybeEnqueueAnalysis(ctx, companyID, p.CampaignID)
 
 	return nil
 }
 
-func (w *linkedInWorker) maybeEnqueueAnalysis(ctx context.Context, companyID uuid.UUID) {
+func (w *linkedInWorker) maybeEnqueueAnalysis(ctx context.Context, companyID uuid.UUID, campaignID string) {
 	company, err := w.queries.GetCompany(ctx, companyID)
 	if err != nil {
 		return
 	}
 	// If both enrichments are done or intelligence already exists, trigger analysis
 	if company.EnrichmentStatus == "processing" {
-		payload, err := json.Marshal(map[string]string{"company_id": companyID.String()})
+		payload, err := json.Marshal(map[string]string{
+			"company_id":  companyID.String(),
+			"campaign_id": campaignID,
+		})
 		if err != nil {
 			slog.Error("Marshal AI analyze payload failed", "company_id", companyID, "error", err)
 			return
