@@ -3,9 +3,9 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,13 +81,19 @@ func (w *webWorker) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Build intelligence payload
-	techJSON, _ := json.Marshal(techStack)
-	webDataJSON, _ := json.Marshal(map[string]interface{}{
+	techJSON, err := json.Marshal(techStack)
+	if err != nil {
+		return fmt.Errorf("marshal tech stack: %w", err)
+	}
+	webDataJSON, err := json.Marshal(map[string]interface{}{
 		"website_description": websiteDesc,
 		"tech_stack":          techStack,
 		"reputation_score":    repScore,
 		"reputation_summary":  repSummary,
 	})
+	if err != nil {
+		return fmt.Errorf("marshal web data: %w", err)
+	}
 
 	params := db.UpsertIntelligenceParams{
 		CompanyID:          companyID,
@@ -111,7 +117,10 @@ func (w *webWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		"tech_count", len(techStack))
 
 	// Enqueue analysis (after a delay so LinkedIn worker can also finish)
-	analyzePayload, _ := json.Marshal(map[string]string{"company_id": companyID.String()})
+	analyzePayload, err := json.Marshal(map[string]string{"company_id": companyID.String()})
+	if err != nil {
+		return fmt.Errorf("marshal analyze payload: %w", err)
+	}
 	if _, err := w.client.Enqueue(
 		asynq.NewTask(TaskAIAnalyze, analyzePayload),
 		asynq.MaxRetry(3),
@@ -119,8 +128,7 @@ func (w *webWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		asynq.ProcessIn(10*time.Second),
 		asynq.Unique(10*time.Second), // deduplicate: only one analyze task per company per 10s
 	); err != nil {
-		// unique constraint hit means it's already enqueued — that's fine
-		if !strings.Contains(err.Error(), "task already exists") {
+		if !errors.Is(err, asynq.ErrDuplicateTask) {
 			slog.Error("Enqueue AI analyze failed", "company_id", companyID, "error", err)
 		}
 	}

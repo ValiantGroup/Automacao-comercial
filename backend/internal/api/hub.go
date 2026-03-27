@@ -32,19 +32,22 @@ func NewHub() *Hub {
 func (h *Hub) Run() {
 	for msg := range h.broadcast {
 		h.mu.RLock()
+		conns := make([]*websocket.Conn, 0, len(h.clients))
 		for conn := range h.clients {
-			go func(c *websocket.Conn, m []byte) {
-				c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				if err := c.WriteMessage(websocket.TextMessage, m); err != nil {
-					slog.Debug("WS write error, removing client", "error", err)
-					h.mu.Lock()
-					delete(h.clients, c)
-					h.mu.Unlock()
-					c.Close()
-				}
-			}(conn, msg)
+			conns = append(conns, conn)
 		}
 		h.mu.RUnlock()
+
+		for _, conn := range conns {
+			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				slog.Debug("WS write error, removing client", "error", err)
+				h.mu.Lock()
+				delete(h.clients, conn)
+				h.mu.Unlock()
+				conn.Close()
+			}
+		}
 	}
 }
 
@@ -77,6 +80,24 @@ func (h *Hub) HandleWS(c *websocket.Conn) {
 		h.mu.Unlock()
 		c.Close()
 		slog.Info("WS client disconnected", "addr", c.RemoteAddr())
+	}()
+
+	stopPing := make(chan struct{})
+	defer close(stopPing)
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := c.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-stopPing:
+				return
+			}
+		}
 	}()
 
 	// Keep alive — read messages (client ping or close)

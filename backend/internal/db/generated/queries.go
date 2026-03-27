@@ -391,6 +391,15 @@ func (q *Queries) CreateCampaign(ctx context.Context, p CreateCampaignParams) (C
 	return c, err
 }
 
+func (q *Queries) UpdateCampaign(ctx context.Context, p UpdateCampaignParams) (Campaign, error) {
+	row := q.db.QueryRow(ctx,
+		`UPDATE campaigns SET name=$2, niche=$3, city=$4, radius_km=$5, daily_limit=$6, auto_send=$7, ai_prompt_context=$8, channels=$9, updated_at=NOW() WHERE id=$1 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at`,
+		p.ID, p.Name, p.Niche, p.City, p.RadiusKM, p.DailyLimit, p.AutoSend, p.AIPromptContext, p.Channels)
+	var c Campaign
+	err := row.Scan(&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+	return c, err
+}
+
 func (q *Queries) UpdateCampaignStatus(ctx context.Context, id uuid.UUID, status string) (Campaign, error) {
 	row := q.db.QueryRow(ctx, `UPDATE campaigns SET status=$2, updated_at=NOW() WHERE id=$1 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at`, id, status)
 	var c Campaign

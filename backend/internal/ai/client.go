@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 const (
@@ -20,15 +20,18 @@ const (
 // Client wraps the OpenAI API.
 type Client struct {
 	apiKey     string
-	httpClient *http.Client
+	httpClient *fasthttp.Client
 }
 
 // NewClient creates a new OpenAI client.
 func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
-		httpClient: &http.Client{
-			Timeout: 90 * time.Second,
+		httpClient: &fasthttp.Client{
+			ReadTimeout:         90 * time.Second,
+			WriteTimeout:        90 * time.Second,
+			MaxIdleConnDuration: 90 * time.Second,
+			MaxConnsPerHost:     50,
 		},
 	}
 }
@@ -79,20 +82,33 @@ func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) 
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", openAIBaseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("request canceled: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	fasthttpReq := fasthttp.AcquireRequest()
+	fasthttpResp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(fasthttpReq)
+	defer fasthttp.ReleaseResponse(fasthttpResp)
+
+	fasthttpReq.SetRequestURI(openAIBaseURL + "/chat/completions")
+	fasthttpReq.Header.SetMethod(fasthttp.MethodPost)
+	fasthttpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	fasthttpReq.Header.Set("Content-Type", "application/json")
+	fasthttpReq.SetBodyRaw(bytes.Clone(body))
+
+	err = c.httpClient.DoTimeout(fasthttpReq, fasthttpResp, 90*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("openai request: %w", err)
 	}
-	defer resp.Body.Close()
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("request canceled: %w", err)
+	}
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody := bytes.Clone(fasthttpResp.Body())
+	if fasthttpResp.StatusCode() >= fasthttp.StatusBadRequest {
+		return "", fmt.Errorf("openai request failed: status=%d body=%s", fasthttpResp.StatusCode(), string(respBody))
+	}
 
 	var chatResp chatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
@@ -139,20 +155,33 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("marshal embed request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", openAIBaseURL+"/embeddings", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create embed request: %w", err)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("request canceled: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	fasthttpReq := fasthttp.AcquireRequest()
+	fasthttpResp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(fasthttpReq)
+	defer fasthttp.ReleaseResponse(fasthttpResp)
+
+	fasthttpReq.SetRequestURI(openAIBaseURL + "/embeddings")
+	fasthttpReq.Header.SetMethod(fasthttp.MethodPost)
+	fasthttpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	fasthttpReq.Header.Set("Content-Type", "application/json")
+	fasthttpReq.SetBodyRaw(bytes.Clone(body))
+
+	err = c.httpClient.DoTimeout(fasthttpReq, fasthttpResp, 90*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("embed request: %w", err)
 	}
-	defer resp.Body.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("request canceled: %w", err)
+	}
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody := bytes.Clone(fasthttpResp.Body())
+	if fasthttpResp.StatusCode() >= fasthttp.StatusBadRequest {
+		return nil, fmt.Errorf("openai embed request failed: status=%d body=%s", fasthttpResp.StatusCode(), string(respBody))
+	}
 
 	var embedResp embedResponse
 	if err := json.Unmarshal(respBody, &embedResp); err != nil {

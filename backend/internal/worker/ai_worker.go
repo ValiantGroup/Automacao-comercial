@@ -68,12 +68,20 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 			}
 			names = append(names, fmt.Sprintf("%s (%s)", s.Name, role))
 		}
-		b, _ := json.Marshal(names)
-		stakeholderDesc = string(b)
+		b, marshalErr := json.Marshal(names)
+		if marshalErr == nil {
+			stakeholderDesc = string(b)
+		}
 	}
 
-	techJSON, _ := json.Marshal(intel.TechStack)
-	openJobsJSON, _ := json.Marshal(intel.OpenJobs)
+	techJSON, err := json.Marshal(intel.TechStack)
+	if err != nil {
+		return fmt.Errorf("marshal tech stack: %w", err)
+	}
+	openJobsJSON, err := json.Marshal(intel.OpenJobs)
+	if err != nil {
+		return fmt.Errorf("marshal open jobs: %w", err)
+	}
 	techStr := string(techJSON)
 	openJobsStr := string(openJobsJSON)
 
@@ -110,8 +118,14 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Build updated intelligence
-	painJSON, _ := json.Marshal(result.PainPoints)
-	techStackJSON, _ := json.Marshal(result.TechStack)
+	painJSON, err := json.Marshal(result.PainPoints)
+	if err != nil {
+		return fmt.Errorf("marshal pain points: %w", err)
+	}
+	techStackJSON, err := json.Marshal(result.TechStack)
+	if err != nil {
+		return fmt.Errorf("marshal tech stack result: %w", err)
+	}
 	fitScore := int32(result.FitScore)
 
 	upsertParams := db.UpsertIntelligenceParams{
@@ -149,15 +163,19 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 
 	// Generate embedding for dedup
 	go func() {
-		embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		embedCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		text := company.Name
 		if company.Address != nil {
 			text += " " + *company.Address
 		}
 		embedding, err := w.aiClient.Embed(embedCtx, text)
-		if err == nil {
-			_ = w.queries.UpdateCompanyEmbedding(embedCtx, companyID, embedding)
+		if err != nil {
+			slog.Warn("Embedding generation failed", "company_id", companyID, "error", err)
+			return
+		}
+		if err := w.queries.UpdateCompanyEmbedding(embedCtx, companyID, embedding); err != nil {
+			slog.Warn("Save embedding failed", "company_id", companyID, "error", err)
 		}
 	}()
 
@@ -171,10 +189,13 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 	slog.Info("AI analysis complete", "company_id", companyID, "fit_score", result.FitScore)
 
 	// Enqueue message generation
-	generatePayload, _ := json.Marshal(map[string]string{
+	generatePayload, err := json.Marshal(map[string]string{
 		"company_id":  companyID.String(),
 		"campaign_id": p.CampaignID,
 	})
+	if err != nil {
+		return fmt.Errorf("marshal generate payload: %w", err)
+	}
 	if _, err := w.client.Enqueue(
 		asynq.NewTask(TaskAIGenerate, generatePayload),
 		asynq.MaxRetry(3),
@@ -244,7 +265,10 @@ func (w *aiWorker) HandleGenerate(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 
-	intelJSON, _ := json.Marshal(intel)
+	intelJSON, err := json.Marshal(intel)
+	if err != nil {
+		return fmt.Errorf("marshal intelligence: %w", err)
+	}
 
 	msgParams := ai.MessageParams{
 		StakeholderName:  stakeholderName,

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,16 @@ func main() {
 	ctx := context.Background()
 
 	// PostgreSQL
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("Parse PostgreSQL config", "error", err)
+		os.Exit(1)
+	}
+	poolCfg.MaxConns = 40
+	poolCfg.MinConns = 5
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		slog.Error("Connect PostgreSQL", "error", err)
 		os.Exit(1)
@@ -34,7 +44,11 @@ func main() {
 	defer pool.Close()
 
 	// Redis
-	redisOpts, _ := redis.ParseURL(cfg.RedisURL)
+	redisOpts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		slog.Error("Parse Redis URL failed", "error", err)
+		os.Exit(1)
+	}
 	asynqRedisOpt := asynq.RedisClientOpt{Addr: redisOpts.Addr}
 
 	// Dependencies
@@ -58,7 +72,7 @@ func main() {
 
 	// Asynq server configuration
 	srv := asynq.NewServer(asynqRedisOpt, asynq.Config{
-		Concurrency: 5,
+		Concurrency: 20,
 		Queues: map[string]int{
 			"critical":   6,
 			"ai":         3,

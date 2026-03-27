@@ -9,8 +9,34 @@ volumes:
   redisdata:
   miniodata:
   evolution_data:
+  traefik_letsencrypt:
+
 
 services:
+  traefik:
+    image: traefik:v3.2
+    restart: unless-stopped
+    profiles: ["edge"]
+    networks: [valiant_net]
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL:?TRAEFIK_ACME_EMAIL is required}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--log.level=INFO"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -45,7 +71,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     restart: unless-stopped
     networks: [valiant_net]
     ports:
@@ -53,8 +79,8 @@ services:
       - "9001:9001"
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
     volumes:
       - miniodata:/data
     healthcheck:
@@ -64,16 +90,16 @@ services:
       retries: 3
 
   evolution-api:
-    image: atendai/evolution-api:latest
+    image: atendai/evolution-api:v2.1.1
     restart: unless-stopped
     networks: [valiant_net]
     ports:
       - "8081:8080"
     environment:
       SERVER_URL: http://localhost:8081
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY is required}
       DATABASE_ENABLED: "true"
-      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/evolution
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/evolution
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,19 +140,26 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/valiant_prospector
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/valiant_prospector
       REDIS_URL: redis://redis:6379
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:?GOOGLE_MAPS_API_KEY is required}
       EVOLUTION_API_URL: http://evolution-api:8080
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
-      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY is required}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:?SENDGRID_API_KEY is required}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:?SENDGRID_FROM_EMAIL is required}
       PLAYWRIGHT_SVC_URL: http://playwright-svc:3002
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-      JWT_SECRET: ${JWT_SECRET}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3001}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`${TRAEFIK_API_HOST:-api.localhost}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.api.loadbalancer.server.port=3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,22 +174,20 @@ services:
       target: worker
     restart: unless-stopped
     networks: [valiant_net]
-    deploy:
-      replicas: 2
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/valiant_prospector
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/valiant_prospector
       REDIS_URL: redis://redis:6379
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:?GOOGLE_MAPS_API_KEY is required}
       EVOLUTION_API_URL: http://evolution-api:8080
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY is required}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:?SENDGRID_API_KEY is required}
       PLAYWRIGHT_SVC_URL: http://playwright-svc:3002
       APOLLO_API_KEY: ${APOLLO_API_KEY}
       HUNTER_API_KEY: ${HUNTER_API_KEY}
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,15 +205,25 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3000}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${TRAEFIK_APP_HOST:-app.localhost}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3001"
     depends_on:
       - api
 
   asynqmon:
-    image: hibiken/asynqmon:latest
+    image: hibiken/asynqmon:0.7.2
     restart: unless-stopped
     networks: [valiant_net]
     ports:
       - "8082:8080"
+    command:
+      - "--redis-addr=redis:6379"
+      - "--basic-auth-user=${ASYNQMON_USER:-admin}"
+      - "--basic-auth-password=${ASYNQMON_PASSWORD:?ASYNQMON_PASSWORD is required}"
     environment:
       REDIS_URL: redis://redis:6379
     depends_on:

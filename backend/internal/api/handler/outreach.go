@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/valiant-group/prospector/internal/api"
 	db "github.com/valiant-group/prospector/internal/db/generated"
 	"github.com/valiant-group/prospector/internal/worker"
 )
@@ -16,10 +15,10 @@ import (
 type OutreachHandler struct {
 	queries     *db.Queries
 	asynqClient *asynq.Client
-	hub         *api.Hub
+	hub         Broadcaster
 }
 
-func NewOutreachHandler(queries *db.Queries, asynqClient *asynq.Client, hub *api.Hub) *OutreachHandler {
+func NewOutreachHandler(queries *db.Queries, asynqClient *asynq.Client, hub Broadcaster) *OutreachHandler {
 	return &OutreachHandler{queries: queries, asynqClient: asynqClient, hub: hub}
 }
 
@@ -43,7 +42,9 @@ func (h *OutreachHandler) Approve(c *fiber.Ctx) error {
 		Content *string `json:"content"`
 		Subject *string `json:"subject"`
 	}
-	c.BodyParser(&body)
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
 
 	msg, err := h.queries.UpdateMessageStatus(c.Context(), id, "approved")
 	if err != nil {
@@ -51,8 +52,10 @@ func (h *OutreachHandler) Approve(c *fiber.Ctx) error {
 	}
 
 	// Enqueue send task
-	payload, _ := json.Marshal(worker.ProspectPayload{})
-	sendPayload, _ := json.Marshal(map[string]string{"message_id": id.String()})
+	sendPayload, err := json.Marshal(map[string]string{"message_id": id.String()})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to enqueue send task"})
+	}
 
 	if _, err := h.asynqClient.Enqueue(
 		asynq.NewTask(worker.TaskOutreachSend, sendPayload),
@@ -63,7 +66,6 @@ func (h *OutreachHandler) Approve(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to enqueue send task"})
 	}
 
-	_ = payload
 	h.hub.Broadcast("message_approved", fiber.Map{"message_id": id, "company_id": msg.CompanyID})
 
 	slog.Info("Message approved and queued for send", "message_id", id)

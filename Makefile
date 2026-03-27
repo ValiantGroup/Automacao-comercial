@@ -1,7 +1,7 @@
-.PHONY: up down build logs migrate shell-api shell-db restart-workers status ps
+.PHONY: up down build logs migrate shell-api shell-db restart-workers status ps seed-admin
 
 up:
-	docker compose up -d
+	docker compose up -d --scale worker=2
 
 down:
 	docker compose down
@@ -14,6 +14,9 @@ logs:
 
 migrate:
 	docker compose run --rm migrate
+
+seed-admin:
+	docker compose run --rm -e ADMIN_NAME -e ADMIN_EMAIL -e ADMIN_PASSWORD api go run ./cmd/seedadmin
 
 shell-api:
 	docker compose exec api sh

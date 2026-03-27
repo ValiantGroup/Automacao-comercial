@@ -5,3 +5,4 @@ ai-analysis/
 *.log
 .DS_Store
 Thumbs.db
+AUDIT_REPORT.md

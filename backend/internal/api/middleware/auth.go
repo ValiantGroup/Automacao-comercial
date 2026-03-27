@@ -17,16 +17,22 @@ type Claims struct {
 func Auth(jwtSecret string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authorization header"})
+		tokenStr := ""
+
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid authorization format"})
+			}
+			tokenStr = parts[1]
+		} else {
+			// Browsers cannot set custom headers during WS upgrade; allow token query for /ws.
+			tokenStr = strings.TrimSpace(c.Query("token"))
+			if tokenStr == "" {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing authorization token"})
+			}
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid authorization format"})
-		}
-
-		tokenStr := parts[1]
 		claims := &Claims{}
 
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {

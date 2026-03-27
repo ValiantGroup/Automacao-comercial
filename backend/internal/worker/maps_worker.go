@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/hibiken/asynq"
+	"github.com/valyala/fasthttp"
 	"golang.org/x/time/rate"
 
 	"github.com/valiant-group/prospector/internal/config"
@@ -22,6 +22,7 @@ type mapsWorker struct {
 	queries *db.Queries
 	client  *asynq.Client
 	limiter *rate.Limiter
+	httpClient *fasthttp.Client
 }
 
 func newMapsWorker(cfg *config.Config, queries *db.Queries, client *asynq.Client) *mapsWorker {
@@ -30,6 +31,12 @@ func newMapsWorker(cfg *config.Config, queries *db.Queries, client *asynq.Client
 		queries: queries,
 		client:  client,
 		limiter: rate.NewLimiter(rate.Every(time.Second/50), 10), // 50 rps
+		httpClient: &fasthttp.Client{
+			ReadTimeout:         30 * time.Second,
+			WriteTimeout:        30 * time.Second,
+			MaxIdleConnDuration: 60 * time.Second,
+			MaxConnsPerHost:     40,
+		},
 	}
 }
 
@@ -115,7 +122,6 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 	params := url.Values{
 		"query":  {query},
 		"radius": {fmt.Sprintf("%d", radiusMeters)},
-		"key":    {w.cfg.GoogleMapsAPIKey},
 	}
 
 	var allPlaces []mapsPlace
@@ -127,16 +133,27 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 			reqURL += "&pagetoken=" + pageToken
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+		defer fasthttp.ReleaseRequest(req)
+		defer fasthttp.ReleaseResponse(resp)
+
+		req.SetRequestURI(reqURL)
+		req.Header.SetMethod(fasthttp.MethodGet)
+		req.Header.Set("X-Goog-Api-Key", w.cfg.GoogleMapsAPIKey)
+		req.Header.Set("Accept", "application/json")
+
+		err := w.httpClient.DoTimeout(req, resp, 30*time.Second)
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		if resp.StatusCode() >= fasthttp.StatusBadRequest {
+			return nil, fmt.Errorf("maps textsearch returned status %d", resp.StatusCode())
+		}
 
 		var result struct {
 			Results   []mapsPlace `json:"results"`
@@ -144,7 +161,7 @@ func (w *mapsWorker) searchPlaces(ctx context.Context, query string, radiusMeter
 			Status    string      `json:"status"`
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err := json.Unmarshal(resp.Body(), &result); err != nil {
 			return nil, err
 		}
 
@@ -236,9 +253,14 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 	}
 
 	// Enqueue enrichment tasks
-	linkedInPayload, _ := json.Marshal(map[string]string{"company_id": company.ID.String()})
-	webPayload, _ := json.Marshal(map[string]string{"company_id": company.ID.String()})
-	hunterPayload, _ := json.Marshal(map[string]string{"company_id": company.ID.String()})
+	linkedInPayload, err := json.Marshal(map[string]string{"company_id": company.ID.String()})
+	if err != nil {
+		return fmt.Errorf("marshal linkedin payload: %w", err)
+	}
+	webPayload, err := json.Marshal(map[string]string{"company_id": company.ID.String()})
+	if err != nil {
+		return fmt.Errorf("marshal web payload: %w", err)
+	}
 
 	if _, err := w.client.Enqueue(
 		asynq.NewTask(TaskEnrichLinkedIn, linkedInPayload),
@@ -256,14 +278,6 @@ func (w *mapsWorker) processPlace(ctx context.Context, place mapsPlace, p Prospe
 		slog.Error("Enqueue web enrichment failed", "company_id", company.ID, "error", err)
 	}
 
-	if _, err := w.client.Enqueue(
-		asynq.NewTask(TaskEnrichHunter, hunterPayload),
-		asynq.MaxRetry(3),
-		asynq.Queue("enrichment"),
-	); err != nil {
-		slog.Error("Enqueue hunter enrichment failed", "company_id", company.ID, "error", err)
-	}
-
 	return nil
 }
 
@@ -271,23 +285,33 @@ func (w *mapsWorker) fetchDetails(ctx context.Context, placeID string) (*mapsDet
 	params := url.Values{
 		"place_id": {placeID},
 		"fields":   {"name,formatted_phone_number,website,formatted_address,rating,user_ratings_total,address_components,geometry,types"},
-		"key":      {w.cfg.GoogleMapsAPIKey},
 	}
 	reqURL := "https://maps.googleapis.com/maps/api/place/details/json?" + params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.SetRequestURI(reqURL)
+	req.Header.SetMethod(fasthttp.MethodGet)
+	req.Header.Set("X-Goog-Api-Key", w.cfg.GoogleMapsAPIKey)
+	req.Header.Set("Accept", "application/json")
+
+	err := w.httpClient.DoTimeout(req, resp, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	if resp.StatusCode() >= fasthttp.StatusBadRequest {
+		return nil, fmt.Errorf("maps details returned status %d", resp.StatusCode())
+	}
 
 	var result mapsDetailsResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

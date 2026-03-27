@@ -1,13 +1,10 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -26,6 +23,7 @@ type linkedInWorker struct {
 	aiClient *ai.Client
 	client   *asynq.Client
 	limiter  *rate.Limiter
+	providerRegistry *stakeholderProviderRegistry
 }
 
 func newLinkedInWorker(cfg *config.Config, queries *db.Queries, aiClient *ai.Client, client *asynq.Client) *linkedInWorker {
@@ -35,20 +33,12 @@ func newLinkedInWorker(cfg *config.Config, queries *db.Queries, aiClient *ai.Cli
 		aiClient: aiClient,
 		client:   client,
 		limiter:  rate.NewLimiter(rate.Every(time.Second/5), 2), // 5 rps
+		providerRegistry: newStakeholderProviderRegistry(cfg),
 	}
 }
 
 type linkedInPayload struct {
 	CompanyID string `json:"company_id"`
-}
-
-type apolloPerson struct {
-	ID                 string  `json:"id"`
-	FirstName          string  `json:"first_name"`
-	LastNameObfuscated string  `json:"last_name_obfuscated"`
-	Title              *string `json:"title"`
-	HasEmail           bool    `json:"has_email"`
-	HasDirectPhone     string  `json:"has_direct_phone"`
 }
 
 func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
@@ -71,27 +61,25 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		slog.Warn("Could not update enrichment status", "company_id", companyID, "error", err)
 	}
 
-	var persons []apolloPerson
-
-	// Try Apollo.io first (more reliable without OAuth)
-	if w.cfg.ApolloAPIKey != "" {
-		persons, err = w.searchApollo(ctx, company)
-		if err != nil {
-			slog.Warn("Apollo search failed, skipping LinkedIn enrichment", "company_id", companyID, "error", err)
-		}
+	candidates, providerUsed, err := w.providerRegistry.FindWithFallback(ctx, company)
+	if err != nil {
+		slog.Warn("Stakeholder providers failed", "company_id", companyID, "error", err)
 	}
 
 	// Save stakeholders
-	for _, person := range persons {
+	for _, candidate := range candidates {
 		if err := w.limiter.Wait(ctx); err != nil {
 			return err
 		}
 
-		name := strings.TrimSpace(person.FirstName + " " + person.LastNameObfuscated)
-		
+		name := strings.TrimSpace(candidate.Name)
+		if name == "" {
+			continue
+		}
+
 		titleVal := ""
-		if person.Title != nil {
-			titleVal = strings.TrimSpace(*person.Title)
+		if candidate.RawTitle != nil {
+			titleVal = strings.TrimSpace(*candidate.RawTitle)
 		}
 
 		// Classify role with AI
@@ -111,79 +99,21 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 			NormalizedRole: strPtr(normalizedRole),
 			RawTitle:       strIfNotEmpty(titleVal),
 			LinkedInURL:    nil,
-			Email:          nil,
-			Phone:          nil,
-			Source:         strPtr("apollo"),
+			Email:          candidate.Email,
+			Phone:          candidate.Phone,
+			Source:         strPtr(candidate.Source),
 		})
 		if err != nil {
 			slog.Error("Create stakeholder failed", "name", name, "error", err)
 		}
 	}
 
-	slog.Info("LinkedIn enrichment done", "company_id", companyID, "stakeholders", len(persons))
+	slog.Info("LinkedIn enrichment done", "company_id", companyID, "stakeholders", len(candidates), "provider", providerUsed)
 
 	// Check if web enrichment is also done so we can trigger AI analysis
 	w.maybeEnqueueAnalysis(ctx, companyID)
 
 	return nil
-}
-
-func (w *linkedInWorker) searchApollo(ctx context.Context, company db.Company) ([]apolloPerson, error) {
-	domain := ""
-	if company.Website != nil {
-		domain = extractDomain(*company.Website)
-	}
-
-	payload := map[string]interface{}{
-		"q_organization_domains_list": []string{domain},
-		"person_titles": []string{
-			"CEO", "CTO", "COO", "CFO",
-			"Head Comercial", "Head de Vendas", "Head de TI",
-			"Diretor", "Director", "VP",
-		},
-		"page":     1,
-		"per_page": 10,
-	}
-
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.apollo.io/api/v1/mixed_people/api_search", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("x-api-key", w.cfg.ApolloAPIKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		switch resp.StatusCode {
-		case 401:
-			return nil, fmt.Errorf("apollo API 401 Unauthorized: Invalid or missing master API key: %s", string(b))
-		case 403:
-			return nil, fmt.Errorf("apollo API 403 Forbidden: Missing master API key or not enough credits: %s", string(b))
-		case 422:
-			return nil, fmt.Errorf("apollo API 422 Unprocessable Entity: Invalid search payload: %s", string(b))
-		case 429:
-			return nil, fmt.Errorf("apollo API 429 Too Many Requests: Rate limit exceeded: %s", string(b))
-		default:
-			return nil, fmt.Errorf("apollo API error %d: %s", resp.StatusCode, string(b))
-		}
-	}
-
-	var result struct {
-		People []apolloPerson `json:"people"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-	return result.People, nil
 }
 
 func (w *linkedInWorker) maybeEnqueueAnalysis(ctx context.Context, companyID uuid.UUID) {
@@ -193,24 +123,19 @@ func (w *linkedInWorker) maybeEnqueueAnalysis(ctx context.Context, companyID uui
 	}
 	// If both enrichments are done or intelligence already exists, trigger analysis
 	if company.EnrichmentStatus == "processing" {
-		payload, _ := json.Marshal(map[string]string{"company_id": companyID.String()})
+		payload, err := json.Marshal(map[string]string{"company_id": companyID.String()})
+		if err != nil {
+			slog.Error("Marshal AI analyze payload failed", "company_id", companyID, "error", err)
+			return
+		}
 		if _, err := w.client.Enqueue(
 			asynq.NewTask(TaskAIAnalyze, payload),
 			asynq.MaxRetry(3),
 			asynq.Queue("ai"),
+			asynq.Unique(30*time.Second),
 			asynq.ProcessIn(5*time.Second), // small delay for web worker to finish
 		); err != nil {
 			slog.Error("Enqueue AI analyze failed", "company_id", companyID, "error", err)
 		}
 	}
-}
-
-func extractDomain(website string) string {
-	website = strings.TrimPrefix(website, "https://")
-	website = strings.TrimPrefix(website, "http://")
-	website = strings.TrimPrefix(website, "www.")
-	if idx := strings.Index(website, "/"); idx >= 0 {
-		website = website[:idx]
-	}
-	return website
 }

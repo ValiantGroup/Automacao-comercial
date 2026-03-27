@@ -32,7 +32,7 @@ func RegisterRoutes(
 	dashboardHandler := handler.NewDashboardHandler(queries)
 
 	// Public routes
-	auth := app.Group("/api/auth")
+	auth := app.Group("/api/auth", middleware.RateLimit(10))
 	auth.Post("/login", authHandler.Login)
 	auth.Post("/refresh", authHandler.Refresh)
 

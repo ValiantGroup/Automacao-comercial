@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 // EvolutionClient sends WhatsApp messages via the Evolution API.
@@ -15,7 +15,7 @@ type EvolutionClient struct {
 	baseURL    string
 	apiKey     string
 	instance   string
-	httpClient *http.Client
+	httpClient *fasthttp.Client
 }
 
 func NewEvolutionClient(baseURL, apiKey, instance string) *EvolutionClient {
@@ -26,8 +26,11 @@ func NewEvolutionClient(baseURL, apiKey, instance string) *EvolutionClient {
 		baseURL:  baseURL,
 		apiKey:   apiKey,
 		instance: instance,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+		httpClient: &fasthttp.Client{
+			ReadTimeout:         30 * time.Second,
+			WriteTimeout:        30 * time.Second,
+			MaxIdleConnDuration: 60 * time.Second,
+			MaxConnsPerHost:     20,
 		},
 	}
 }
@@ -54,26 +57,39 @@ func (e *EvolutionClient) SendText(ctx context.Context, phone, message string) (
 		Delay:  1000,
 	}
 
-	body, _ := json.Marshal(reqBody)
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
 	url := fmt.Sprintf("%s/message/sendText/%s", e.baseURL, e.instance)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("request canceled: %w", err)
 	}
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.SetRequestURI(url)
+	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("apikey", e.apiKey)
+	req.SetBodyRaw(bytes.Clone(body))
 
-	resp, err := e.httpClient.Do(req)
+	err = e.httpClient.DoTimeout(req, resp, 30*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("evolution send: %w", err)
 	}
-	defer resp.Body.Close()
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("request canceled: %w", err)
+	}
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody := bytes.Clone(resp.Body())
 
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("evolution API error %d: %s", resp.StatusCode, string(respBody))
+	if resp.StatusCode() >= fasthttp.StatusBadRequest {
+		return "", fmt.Errorf("evolution API error %d: %s", resp.StatusCode(), string(respBody))
 	}
 
 	var result sendTextResponse

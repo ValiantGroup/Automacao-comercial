@@ -71,7 +71,10 @@ func (h *CampaignHandler) Create(c *fiber.Ctx) error {
 		body.Channels = []string{"whatsapp"}
 	}
 
-	channelsJSON, _ := json.Marshal(body.Channels)
+	channelsJSON, err := json.Marshal(body.Channels)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid channels"})
+	}
 	userID, _ := c.Locals("user_id").(string)
 	createdBy, _ := uuid.Parse(userID)
 
@@ -130,10 +133,24 @@ func (h *CampaignHandler) Update(c *fiber.Ctx) error {
 		campaign.AIPromptContext = *body.AIPromptContext
 	}
 	if len(body.Channels) > 0 {
-		campaign.Channels, _ = json.Marshal(body.Channels)
+		channelsJSON, marshalErr := json.Marshal(body.Channels)
+		if marshalErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid channels"})
+		}
+		campaign.Channels = channelsJSON
 	}
 
-	updated, err := h.queries.UpdateCampaignStatus(c.Context(), id, campaign.Status)
+	updated, err := h.queries.UpdateCampaign(c.Context(), db.UpdateCampaignParams{
+		ID:              campaign.ID,
+		Name:            campaign.Name,
+		Niche:           campaign.Niche,
+		City:            campaign.City,
+		RadiusKM:        campaign.RadiusKM,
+		DailyLimit:      campaign.DailyLimit,
+		AutoSend:        campaign.AutoSend,
+		AIPromptContext: campaign.AIPromptContext,
+		Channels:        campaign.Channels,
+	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update campaign"})
 	}
@@ -167,12 +184,15 @@ func (h *CampaignHandler) Start(c *fiber.Ctx) error {
 	}
 
 	// Enqueue prospect task
-	payload, _ := json.Marshal(worker.ProspectPayload{
+	payload, err := json.Marshal(worker.ProspectPayload{
 		Niche:      campaign.Niche,
 		City:       campaign.City,
 		RadiusKM:   int(campaign.RadiusKM),
 		CampaignID: id.String(),
 	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to start campaign"})
+	}
 
 	if _, err := h.asynqClient.Enqueue(
 		asynq.NewTask(worker.TaskProspect, payload),

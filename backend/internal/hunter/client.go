@@ -5,16 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
 
 type Client struct {
 	apiKey string
+	httpClient *fasthttp.Client
 }
 
 func NewClient(apiKey string) *Client {
-	return &Client{apiKey: apiKey}
+	return &Client{
+		apiKey: apiKey,
+		httpClient: &fasthttp.Client{
+			ReadTimeout:         15 * time.Second,
+			WriteTimeout:        15 * time.Second,
+			MaxIdleConnDuration: 30 * time.Second,
+			MaxConnsPerHost:     20,
+		},
+	}
 }
 
 type DomainSearchResponse struct {
@@ -59,8 +69,15 @@ func (c *Client) DomainSearch(ctx context.Context, domain string) (*DomainSearch
 	req.Header.Set("X-API-KEY", c.apiKey)
 	req.Header.Set("Accept", "application/json")
 
-	err := fasthttp.Do(req, resp)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	err := c.httpClient.DoTimeout(req, resp, 15*time.Second)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 

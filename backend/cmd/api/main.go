@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/websocket/v2"
 	"github.com/hibiken/asynq"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/valiant-group/prospector/internal/ai"
 	"github.com/valiant-group/prospector/internal/api"
+	apimiddleware "github.com/valiant-group/prospector/internal/api/middleware"
 	"github.com/valiant-group/prospector/internal/config"
 	db "github.com/valiant-group/prospector/internal/db/generated"
 	"github.com/valiant-group/prospector/internal/outreach"
@@ -33,7 +35,17 @@ func main() {
 
 	// ─── PostgreSQL ──────────────────────────────────────────────────────────
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("Parse PostgreSQL config failed", "error", err)
+		os.Exit(1)
+	}
+	poolCfg.MaxConns = 30
+	poolCfg.MinConns = 5
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+	poolCfg.MaxConnLifetime = 30 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		slog.Error("Connect PostgreSQL failed", "error", err)
 		os.Exit(1)
@@ -84,15 +96,16 @@ func main() {
 
 	app.Use(recover.New())
 	app.Use(compress.New())
+	app.Use(helmet.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*",
+		AllowOrigins:     cfg.CORSAllowedOrigins,
 		AllowMethods:     "GET,POST,PATCH,DELETE,OPTIONS",
 		AllowHeaders:     "Content-Type,Authorization",
-		AllowCredentials: false,
+		AllowCredentials: true,
 	}))
 
 	// WebSocket endpoint
-	app.Use("/ws", func(c *fiber.Ctx) error {
+	app.Use("/ws", apimiddleware.Auth(cfg.JWTSecret), func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			return c.Next()
 		}

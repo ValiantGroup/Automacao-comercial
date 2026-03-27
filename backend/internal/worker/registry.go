@@ -18,7 +18,6 @@ const (
 	TaskEnrichMaps     = "enrich:maps"
 	TaskEnrichLinkedIn = "enrich:linkedin"
 	TaskEnrichWeb      = "enrich:web"
-	TaskEnrichHunter   = "enrich:hunter"
 	TaskAIAnalyze      = "ai:analyze"
 	TaskAIGenerate     = "ai:generate"
 	TaskOutreachSend   = "outreach:send"
@@ -44,18 +43,16 @@ func Registry(
 	ww := newWebWorker(cfg, queries, scraperClient, client)
 	aw := newAIWorker(cfg, queries, aiClient, client, broadcaster)
 	ow := newOutreachWorker(cfg, queries, evolutionClient, sendgridClient, broadcaster)
-	hw := newHunterWorker(cfg, queries, client)
 
 	mux.HandleFunc(TaskProspect, mw.Handle)
 	mux.HandleFunc(TaskEnrichLinkedIn, lw.Handle)
 	mux.HandleFunc(TaskEnrichWeb, ww.Handle)
-	mux.HandleFunc(TaskEnrichHunter, hw.Handle)
 	mux.HandleFunc(TaskAIAnalyze, aw.Handle)
 	mux.HandleFunc(TaskAIGenerate, aw.HandleGenerate)
 	mux.HandleFunc(TaskOutreachSend, ow.Handle)
 
 	slog.Info("Worker registry initialized",
-		"tasks", []string{TaskProspect, TaskEnrichLinkedIn, TaskEnrichWeb, TaskEnrichHunter, TaskAIAnalyze, TaskAIGenerate, TaskOutreachSend})
+		"tasks", []string{TaskProspect, TaskEnrichLinkedIn, TaskEnrichWeb, TaskAIAnalyze, TaskAIGenerate, TaskOutreachSend})
 
 	return mux
 }

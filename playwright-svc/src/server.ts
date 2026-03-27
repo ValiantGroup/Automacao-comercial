@@ -1,4 +1,6 @@
 import express, { Request, Response } from 'express';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 
 const app = express();
@@ -16,7 +18,7 @@ const USER_AGENTS = [
 ];
 
 // Browser pool
-const POOL_SIZE = 3;
+const POOL_SIZE = parseInt(process.env.BROWSER_POOL_SIZE || '5', 10);
 const browserPool: Browser[] = [];
 let poolInitialized = false;
 
@@ -57,6 +59,60 @@ function randomUA(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split('.').map((n) => parseInt(n, 10));
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true;
+  if (parts[0] === 10) return true;
+  if (parts[0] === 127) return true;
+  if (parts[0] === 169 && parts[1] === 254) return true;
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+  if (parts[0] === 192 && parts[1] === 168) return true;
+  return false;
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80');
+}
+
+async function ensurePublicURL(rawURL: string): Promise<URL> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawURL);
+  } catch {
+    throw new Error('invalid url');
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('only http/https are allowed');
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+    throw new Error('private hostname is not allowed');
+  }
+
+  if (net.isIP(host)) {
+    if ((net.isIPv4(host) && isPrivateIPv4(host)) || (net.isIPv6(host) && isPrivateIPv6(host))) {
+      throw new Error('private IP is not allowed');
+    }
+    return parsed;
+  }
+
+  const records = await dns.lookup(host, { all: true });
+  if (records.length === 0) {
+    throw new Error('hostname not resolvable');
+  }
+
+  for (const record of records) {
+    if ((record.family === 4 && isPrivateIPv4(record.address)) || (record.family === 6 && isPrivateIPv6(record.address))) {
+      throw new Error('hostname resolves to private address');
+    }
+  }
+
+  return parsed;
+}
+
 // ─── Health ────────────────────────────────────────────────────────────────
 
 app.get('/health', (_req: Request, res: Response) => {
@@ -69,9 +125,16 @@ app.post('/scrape/website', async (req: Request, res: Response) => {
   const { url } = req.body as { url: string };
   if (!url) return res.status(400).json({ error: 'url required' });
 
+  let targetURL: URL;
+  try {
+    targetURL = await ensurePublicURL(url);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'invalid url' });
+  }
+
   const { page, context } = await getPage(randomUA());
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.goto(targetURL.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
     const title = await page.title();
     const description = await page.$eval(
@@ -128,7 +191,7 @@ app.post('/scrape/website', async (req: Request, res: Response) => {
     return res.json({ title, description, text_content: textContent.slice(0, 2000), technologies, links });
   } catch (err: any) {
     console.error('Website scrape error:', err.message);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'website scrape failed' });
   } finally {
     await context.close();
   }
@@ -206,7 +269,7 @@ app.post('/scrape/google-search', async (req: Request, res: Response) => {
     return res.json({ results });
   } catch (err: any) {
     console.error('Google search error:', err.message);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'google search failed' });
   } finally {
     await context.close();
   }

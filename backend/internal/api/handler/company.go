@@ -9,17 +9,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
-	"github.com/valiant-group/prospector/internal/api"
 	db "github.com/valiant-group/prospector/internal/db/generated"
 )
 
+type Broadcaster interface {
+	Broadcast(eventType string, payload interface{})
+}
+
 type CompanyHandler struct {
 	queries     *db.Queries
-	hub         *api.Hub
+	hub         Broadcaster
 	asynqClient *asynq.Client
 }
 
-func NewCompanyHandler(queries *db.Queries, hub *api.Hub, asynqClient *asynq.Client) *CompanyHandler {
+func NewCompanyHandler(queries *db.Queries, hub Broadcaster, asynqClient *asynq.Client) *CompanyHandler {
 	return &CompanyHandler{queries: queries, hub: hub, asynqClient: asynqClient}
 }
 
@@ -127,8 +130,12 @@ func (h *CompanyHandler) UpdateStage(c *fiber.Ctx) error {
 	}
 
 	// Emit pipeline event
-	payload, _ := json.Marshal(fiber.Map{"stage": body.Stage, "user_id": c.Locals("user_id")})
-	h.queries.CreatePipelineEvent(c.Context(), id, "stage_changed", payload)
+	payload, err := json.Marshal(fiber.Map{"stage": body.Stage, "user_id": c.Locals("user_id")})
+	if err != nil {
+		slog.Error("Marshal pipeline event failed", "company_id", id, "error", err)
+	} else if _, err := h.queries.CreatePipelineEvent(c.Context(), id, "stage_changed", payload); err != nil {
+		slog.Error("Create pipeline event failed", "company_id", id, "error", err)
+	}
 
 	// Broadcast to WS clients
 	h.hub.Broadcast("stage_changed", fiber.Map{"company_id": id, "stage": body.Stage})

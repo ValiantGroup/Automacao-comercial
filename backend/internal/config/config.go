@@ -15,6 +15,7 @@ type Config struct {
 
 	// Auth
 	JWTSecret string
+	CORSAllowedOrigins string
 
 	// OpenAI
 	OpenAIAPIKey string
@@ -50,13 +51,13 @@ type Config struct {
 }
 
 // Load reads environment variables and returns a populated Config.
-// Missing required variables are logged as warnings; the app will fail at
-// runtime when it actually tries to use the missing value.
+// Critical variables must be provided at startup.
 func Load() *Config {
 	cfg := &Config{
-		DatabaseURL:          getEnv("DATABASE_URL", "postgresql://valiant:changeme@localhost:5432/valiant_prospector?sslmode=disable"),
+		DatabaseURL:          getEnv("DATABASE_URL", ""),
 		RedisURL:             getEnv("REDIS_URL", "redis://localhost:6379"),
 		JWTSecret:            getEnv("JWT_SECRET", ""),
+		CORSAllowedOrigins:   getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001"),
 		OpenAIAPIKey:         getEnv("OPENAI_API_KEY", ""),
 		GoogleMapsAPIKey:     getEnv("GOOGLE_MAPS_API_KEY", ""),
 		LinkedInClientID:     getEnv("LINKEDIN_CLIENT_ID", ""),
@@ -68,13 +69,22 @@ func Load() *Config {
 		SendGridAPIKey:       getEnv("SENDGRID_API_KEY", ""),
 		SendGridFromEmail:    getEnv("SENDGRID_FROM_EMAIL", ""),
 		PlaywrightSvcURL:     getEnv("PLAYWRIGHT_SVC_URL", "http://localhost:3002"),
-		MinIOEndpoint:        getEnv("MINIO_ENDPOINT", "localhost:9000"),
-		MinIOAccessKey:       getEnv("MINIO_ACCESS_KEY", "minioadmin"),
+		MinIOEndpoint:        getEnv("MINIO_ENDPOINT", ""),
+		MinIOAccessKey:       getEnv("MINIO_ACCESS_KEY", ""),
 		MinIOSecretKey:       getEnv("MINIO_SECRET_KEY", ""),
 	}
 
+	if cfg.DatabaseURL == "" {
+		slog.Error("DATABASE_URL is required")
+		os.Exit(1)
+	}
 	if cfg.JWTSecret == "" {
-		slog.Warn("JWT_SECRET not set — authentication will fail")
+		slog.Error("JWT_SECRET is required")
+		os.Exit(1)
+	}
+	if cfg.MinIOEndpoint == "" || cfg.MinIOAccessKey == "" || cfg.MinIOSecretKey == "" {
+		slog.Error("MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required")
+		os.Exit(1)
 	}
 	if cfg.OpenAIAPIKey == "" {
 		slog.Warn("OPENAI_API_KEY not set — AI features will fail")

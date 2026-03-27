@@ -76,9 +76,18 @@ func (w *outreachWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		return fmt.Errorf("get outreach message: %w", err)
 	}
 
+	if msg.Status == "sent" {
+		slog.Info("Message already sent, skipping retry", "message_id", msgID)
+		return nil
+	}
+
 	if msg.Status != "approved" {
 		slog.Warn("Message not approved, skipping send", "message_id", msgID, "status", msg.Status)
 		return nil
+	}
+
+	if _, err := w.queries.UpdateMessageStatus(ctx, msgID, "sending"); err != nil {
+		return fmt.Errorf("mark message as sending: %w", err)
 	}
 
 	var sendgridID, evolutionID *string
@@ -86,12 +95,12 @@ func (w *outreachWorker) Handle(ctx context.Context, t *asynq.Task) error {
 	switch msg.Channel {
 	case "whatsapp":
 		if err := w.sendWhatsApp(ctx, msg, &evolutionID); err != nil {
-			w.queries.UpdateMessageStatus(ctx, msgID, "failed")
+			_, _ = w.queries.UpdateMessageStatus(ctx, msgID, "failed")
 			return fmt.Errorf("send whatsapp: %w", err)
 		}
 	case "email":
 		if err := w.sendEmail(ctx, msg, &sendgridID); err != nil {
-			w.queries.UpdateMessageStatus(ctx, msgID, "failed")
+			_, _ = w.queries.UpdateMessageStatus(ctx, msgID, "failed")
 			return fmt.Errorf("send email: %w", err)
 		}
 	default:
