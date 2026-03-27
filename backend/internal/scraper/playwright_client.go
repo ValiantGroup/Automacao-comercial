@@ -125,9 +125,21 @@ func (c *Client) post(ctx context.Context, path string, body []byte, out interfa
 	req.Header.Set("Content-Type", "application/json")
 	req.SetBodyRaw(bytes.Clone(body))
 
-	err := c.httpClient.DoTimeout(req, resp, 60*time.Second)
-	if err != nil {
-		return err
+	const maxAttempts = 2
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = c.httpClient.DoTimeout(req, resp, 60*time.Second)
+		if err == nil {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("request canceled: %w", err)
+		}
+		if attempt == maxAttempts || !isTransientPlaywrightSvcTransportError(err) {
+			return err
+		}
+		time.Sleep(150 * time.Millisecond)
+		resp.Reset()
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("request canceled: %w", err)
@@ -138,6 +150,20 @@ func (c *Client) post(ctx context.Context, path string, body []byte, out interfa
 	}
 
 	return json.Unmarshal(resp.Body(), out)
+}
+
+func isTransientPlaywrightSvcTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return (
+		strings.Contains(msg, "server closed connection before returning the first response byte") ||
+			strings.Contains(msg, "connection reset by peer") ||
+			strings.Contains(msg, "broken pipe") ||
+			strings.Contains(msg, "i/o timeout") ||
+			strings.Contains(msg, "connection refused")
+	)
 }
 
 func normalizeWebsiteCandidates(raw string) []string {
@@ -171,3 +197,4 @@ func normalizeWebsiteCandidates(raw string) []string {
 	appendUnique("http://"+raw, &result)
 	return result
 }
+

@@ -71,14 +71,16 @@ func Load() *Config {
 		}
 	}
 
+	isGroq := strings.HasPrefix(openAIAPIKey, "gsk_") || strings.Contains(strings.ToLower(openAIBaseURL), "api.groq.com")
+
 	if openAIModel == "" {
 		openAIModel = "gpt-4o"
-		if strings.HasPrefix(openAIAPIKey, "gsk_") {
+		if isGroq {
 			openAIModel = "llama-3.3-70b-versatile"
 		}
 	}
 
-	if openAIEmbedModel == "" {
+	if openAIEmbedModel == "" && !isGroq {
 		openAIEmbedModel = "text-embedding-3-small"
 	}
 
@@ -121,8 +123,11 @@ func Load() *Config {
 	}
 	if cfg.OpenAIAPIKey == "" {
 		slog.Warn("OPENAI_API_KEY not set — AI features will fail")
-	} else if strings.HasPrefix(cfg.OpenAIAPIKey, "gsk_") {
+	} else if strings.HasPrefix(cfg.OpenAIAPIKey, "gsk_") || strings.Contains(strings.ToLower(cfg.OpenAIBaseURL), "api.groq.com") {
 		slog.Info("Detected Groq API key; using OpenAI-compatible configuration", "base_url", cfg.OpenAIBaseURL, "model", cfg.OpenAIModel)
+	}
+	if cfg.OpenAIEmbedModel == "" {
+		slog.Info("OPENAI_EMBED_MODEL not set; embedding generation disabled")
 	}
 	if cfg.GoogleMapsAPIKey == "" {
 		slog.Warn("GOOGLE_MAPS_API_KEY not set — prospecting will fail")
@@ -137,3 +142,6 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
+
+

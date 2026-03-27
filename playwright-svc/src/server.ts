@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
 import dns from "node:dns/promises";
 import net from "node:net";
 import { chromium, Browser, BrowserContext, Page } from "playwright";
@@ -6,8 +6,34 @@ import { chromium, Browser, BrowserContext, Page } from "playwright";
 const app = express();
 app.use(express.json());
 
+function isJSONBodyParseError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const parseErr = err as {
+    type?: string;
+    status?: number;
+    message?: string;
+  };
+  return (
+    parseErr.type === "entity.parse.failed" ||
+    (parseErr.status === 400 &&
+      typeof parseErr.message === "string" &&
+      parseErr.message.toLowerCase().includes("json"))
+  );
+}
+
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (isJSONBodyParseError(err)) {
+    return res.status(400).json({ error: "invalid json body" });
+  }
+  return next(err);
+});
+
 const PORT = parseInt(process.env.PORT || "3002", 10);
 const PROXY_URL = process.env.PROXY_URL || "";
+const PROXY_BYPASS_MS = parseInt(
+  process.env.PROXY_BYPASS_MS || `${10 * 60 * 1000}`,
+  10,
+);
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -40,11 +66,25 @@ type WebsiteResponse = {
   skipped_reason?: string;
 };
 
+function skippedWebsiteResponse(reason: string): WebsiteResponse {
+  return {
+    title: "",
+    description: "",
+    text_content: "",
+    technologies: [],
+    links: [],
+    source: "skipped",
+    skipped_reason: reason,
+  };
+}
+
 // Browser pool
 const POOL_SIZE = parseInt(process.env.BROWSER_POOL_SIZE || "5", 10);
 const browserPool: Browser[] = [];
 let poolInitialized = false;
 let poolIdx = 0;
+let directBrowser: Browser | null = null;
+let proxyBypassUntil = 0;
 
 async function initPool(): Promise<void> {
   if (poolInitialized) return;
@@ -69,6 +109,20 @@ async function initPool(): Promise<void> {
   console.log(`Browser pool initialized (${POOL_SIZE} browsers)`);
 }
 
+async function getDirectBrowser(): Promise<Browser> {
+  if (directBrowser) return directBrowser;
+  directBrowser = await chromium.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+    ],
+  });
+  console.warn("Initialized direct browser fallback (without proxy)");
+  return directBrowser;
+}
+
 function randomUA(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
@@ -87,6 +141,93 @@ async function getPage(
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
   return { page, context };
+}
+
+async function getDirectPage(
+  ua: string,
+): Promise<{ page: Page; context: BrowserContext }> {
+  const browser = await getDirectBrowser();
+  const context = await browser.newContext({
+    userAgent: ua,
+    viewport: { width: 1280, height: 800 },
+    ignoreHTTPSErrors: true,
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(30_000);
+  return { page, context };
+}
+
+function isProxyFailure(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    msg.includes("err_proxy_connection_failed") ||
+    msg.includes("err_tunnel_connection_failed") ||
+    msg.includes("proxy")
+  );
+}
+
+function isExecutionContextDestroyed(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    msg.includes("execution context was destroyed") ||
+    msg.includes("most likely because of a navigation") ||
+    msg.includes("cannot find context with specified id")
+  );
+}
+
+function isExpectedSiteUnavailableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    msg.includes("err_connection_refused") ||
+    msg.includes("err_address_unreachable") ||
+    msg.includes("err_internet_disconnected") ||
+    msg.includes("err_name_not_resolved") ||
+    msg.includes("err_too_many_redirects") ||
+    msg.includes("err_connection_reset") ||
+    msg.includes("err_connection_timed_out") ||
+    msg.includes("err_ssl_protocol_error") ||
+    msg.includes("err_ssl_version_or_cipher_mismatch") ||
+    msg.includes("err_cert_") ||
+    msg.includes("err_timed_out") ||
+    msg.includes("econnrefused") ||
+    msg.includes("econnreset") ||
+    msg.includes("eai_again") ||
+    msg.includes("enotfound") ||
+    msg.includes("tls handshake") ||
+    msg.includes("ssl routines") ||
+    msg.includes("socket hang up") ||
+    msg.includes("hostname not resolvable") ||
+    msg.includes("fetch failed") ||
+    msg.includes("http status 404") ||
+    msg.includes("http status 410") ||
+    msg.includes("http status 429") ||
+    msg.includes("http status 500") ||
+    msg.includes("http status 502") ||
+    msg.includes("http status 503") ||
+    msg.includes("http status 521") ||
+    msg.includes("http status 522") ||
+    msg.includes("http status 525")
+  );
+}
+
+function isProxyEnabledNow(): boolean {
+  if (!PROXY_URL) return false;
+  return Date.now() >= proxyBypassUntil;
+}
+
+function activateProxyBypass(reason: unknown): void {
+  if (!PROXY_URL) return;
+  const previous = proxyBypassUntil;
+  proxyBypassUntil = Date.now() + Math.max(10_000, PROXY_BYPASS_MS);
+  if (previous <= Date.now()) {
+    const msg =
+      reason instanceof Error ? reason.message : String(reason ?? "proxy error");
+    console.warn(
+      `Proxy failure detected (${msg}); switching to direct mode for ${Math.round(
+        PROXY_BYPASS_MS / 1000,
+      )}s`,
+    );
+  }
 }
 
 function isPrivateIPv4(ip: string): boolean {
@@ -250,69 +391,82 @@ function detectTechnologiesFromContent(content: string): string[] {
 
 async function scrapeWebsiteWithPlaywright(
   targetURL: URL,
+  useDirect = false,
 ): Promise<WebsiteResponse> {
-  const { page, context } = await getPage(randomUA());
+  const { page, context } = useDirect
+    ? await getDirectPage(randomUA())
+    : await getPage(randomUA());
   try {
     await page.goto(targetURL.toString(), {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
+    let pageData:
+      | {
+          title: string;
+          description: string;
+          text: string;
+          links: string[];
+          html: string;
+        }
+      | undefined;
 
-    const title = normalizeSpace(await page.title());
-    const description = await page
-      .$eval('meta[name="description"]', (el) =>
-        (el.getAttribute("content") || "").trim(),
-      )
-      .catch(() => "");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+        if (attempt > 0) {
+          await page.waitForTimeout(250);
+        }
 
-    const textContent = await page.evaluate(() => {
-      const body = document.body;
-      if (!body) return "";
-      const elements = body.querySelectorAll("p, h1, h2, h3, li");
-      return Array.from(elements)
-        .map((el) => el.textContent?.trim() || "")
-        .filter(Boolean)
-        .slice(0, 120)
-        .join(" ");
-    });
+        pageData = await page.evaluate(() => {
+          const title = document.title || "";
+          const description =
+            (
+              document.querySelector('meta[name="description"]') as
+                | HTMLMetaElement
+                | null
+            )?.content || "";
 
-    const links = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("a[href]"))
-        .map((a) => (a as HTMLAnchorElement).href)
-        .filter((h) => h.startsWith("http"))
-        .slice(0, 20),
-    );
+          const body = document.body;
+          let text = "";
+          if (body) {
+            const elements = body.querySelectorAll("p, h1, h2, h3, li");
+            text = Array.from(elements)
+              .map((el) => el.textContent?.trim() || "")
+              .filter(Boolean)
+              .slice(0, 120)
+              .join(" ");
+          }
 
-    const technologies = await page.evaluate(() => {
-      const html = document.documentElement?.outerHTML || "";
-      const patterns: Record<string, RegExp> = {
-        React: /react/i,
-        "Vue.js": /vue/i,
-        Angular: /angular/i,
-        "Next.js": /next/i,
-        WordPress: /wp-content|wp-includes/i,
-        Shopify: /shopify/i,
-        jQuery: /jquery/i,
-        Bootstrap: /bootstrap/i,
-        Tailwind: /tailwind/i,
-        "Google Analytics": /google-analytics|gtag/i,
-        HubSpot: /hubspot/i,
-        Intercom: /intercom/i,
-        Hotjar: /hotjar/i,
-      };
-      const out: string[] = [];
-      for (const [tech, pattern] of Object.entries(patterns)) {
-        if (pattern.test(html)) out.push(tech);
+          const links = Array.from(document.querySelectorAll("a[href]"))
+            .map((a) => (a as HTMLAnchorElement).href)
+            .filter((h) => h.startsWith("http"))
+            .slice(0, 20);
+
+          const html = document.documentElement?.outerHTML || "";
+          return { title, description, text, links, html };
+        });
+        break;
+      } catch (err: unknown) {
+        if (attempt < 2 && isExecutionContextDestroyed(err)) {
+          continue;
+        }
+        throw err;
       }
-      return out;
-    });
+    }
+
+    if (!pageData) {
+      throw new Error("unable to extract website data");
+    }
+
+    const technologies = detectTechnologiesFromContent(pageData.html);
 
     return {
-      title,
-      description: normalizeSpace(description),
-      text_content: normalizeSpace(textContent).slice(0, 4000),
+      title: normalizeSpace(pageData.title),
+      description: normalizeSpace(pageData.description),
+      text_content: normalizeSpace(pageData.text).slice(0, 4000),
       technologies,
-      links,
+      links: pageData.links,
       source: "playwright",
     };
   } finally {
@@ -368,7 +522,15 @@ async function scrapeWebsiteWithHTTPFallback(
 
 // Health
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok", pool_size: browserPool.length });
+  const now = Date.now();
+  res.json({
+    status: "ok",
+    pool_size: browserPool.length,
+    proxy_configured: !!PROXY_URL,
+    proxy_enabled_now: isProxyEnabledNow(),
+    proxy_bypass_seconds_remaining:
+      proxyBypassUntil > now ? Math.ceil((proxyBypassUntil - now) / 1000) : 0,
+  });
 });
 
 // Scrape website
@@ -380,32 +542,51 @@ app.post("/scrape/website", async (req: Request, res: Response) => {
   try {
     targetURL = await ensurePublicURL(url);
   } catch (err: unknown) {
+    if (isExpectedSiteUnavailableError(err)) {
+      return res.json(skippedWebsiteResponse("site_unreachable_or_invalid"));
+    }
     const msg = err instanceof Error ? err.message : "invalid url";
     return res.status(400).json({ error: msg });
   }
 
   if (hostIsUnsupported(targetURL.hostname)) {
-    const skipped: WebsiteResponse = {
-      title: "",
-      description: "",
-      text_content: "",
-      technologies: [],
-      links: [],
-      source: "skipped",
-      skipped_reason: "unsupported_host",
-    };
-    return res.json(skipped);
+    return res.json(skippedWebsiteResponse("unsupported_host"));
   }
 
+  const useProxy = isProxyEnabledNow();
   try {
-    const result = await scrapeWebsiteWithPlaywright(targetURL);
+    const result = await scrapeWebsiteWithPlaywright(targetURL, !useProxy);
     return res.json(result);
   } catch (playwrightErr: unknown) {
     const playwrightMsg =
       playwrightErr instanceof Error ? playwrightErr.message : "unknown error";
-    console.warn(
-      `Playwright scrape failed for ${targetURL.toString()}: ${playwrightMsg}`,
-    );
+
+    if (useProxy && isProxyFailure(playwrightErr)) {
+      activateProxyBypass(playwrightErr);
+      try {
+        const directResult = await scrapeWebsiteWithPlaywright(targetURL, true);
+        console.info(
+          `Website scrape recovered via direct mode for ${targetURL.toString()}`,
+        );
+        return res.json(directResult);
+      } catch (directErr: unknown) {
+        const directMsg =
+          directErr instanceof Error ? directErr.message : "unknown error";
+        console.warn(
+          `Direct playwright retry failed for ${targetURL.toString()}: ${directMsg}`,
+        );
+      }
+    } else {
+      if (isExpectedSiteUnavailableError(playwrightErr)) {
+        console.info(
+          `Playwright scrape unavailable for ${targetURL.toString()}: ${playwrightMsg}`,
+        );
+      } else {
+        console.warn(
+          `Playwright scrape failed for ${targetURL.toString()}: ${playwrightMsg}`,
+        );
+      }
+    }
 
     try {
       const fallbackResult = await scrapeWebsiteWithHTTPFallback(targetURL);
@@ -413,9 +594,17 @@ app.post("/scrape/website", async (req: Request, res: Response) => {
     } catch (fallbackErr: unknown) {
       const fallbackMsg =
         fallbackErr instanceof Error ? fallbackErr.message : "unknown error";
-      console.error(
-        `HTTP fallback failed for ${targetURL.toString()}: ${fallbackMsg}`,
-      );
+      if (
+        isExpectedSiteUnavailableError(playwrightErr) ||
+        isExpectedSiteUnavailableError(fallbackErr)
+      ) {
+        console.info(
+          `Website unreachable or invalid for ${targetURL.toString()} (playwright/fallback failed)`,
+        );
+        return res.json(skippedWebsiteResponse("site_unreachable_or_invalid"));
+      }
+
+      console.error(`HTTP fallback failed for ${targetURL.toString()}: ${fallbackMsg}`);
       return res.status(500).json({ error: "website scrape failed" });
     }
   }
@@ -427,56 +616,77 @@ app.post("/scrape/reclame-aqui", async (req: Request, res: Response) => {
   if (!company_name)
     return res.status(400).json({ error: "company_name required" });
 
-  const { page, context } = await getPage(randomUA());
-  try {
-    const slug = company_name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-    await page.goto(`https://www.reclameaqui.com.br/empresa/${slug}/`, {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-
-    const notFound = await page
-      .$('[data-testid="not-found"]')
-      .catch(() => null);
-    if (notFound) {
-      return res.json({
-        found: false,
-        score: 0,
-        solution_rate: 0,
-        complaints_count: 0,
-        summary: "",
+  const attempt = async (useDirect = false) => {
+    const { page, context } = useDirect
+      ? await getDirectPage(randomUA())
+      : await getPage(randomUA());
+    try {
+      const slug = company_name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+      await page.goto(`https://www.reclameaqui.com.br/empresa/${slug}/`, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
       });
+
+      const notFound = await page.$('[data-testid="not-found"]').catch(() => null);
+      if (notFound) {
+        return {
+          found: false,
+          score: 0,
+          solution_rate: 0,
+          complaints_count: 0,
+          summary: "",
+        };
+      }
+
+      const score = await page
+        .evaluate(() => {
+          const el = document.querySelector('[data-testid="company-score"]');
+          return el ? parseFloat((el.textContent || "0").replace(",", ".")) : 0;
+        })
+        .catch(() => 0);
+
+      const complaintsCount = await page
+        .evaluate(() => {
+          const el = document.querySelector('[data-testid="complaints-count"]');
+          return el ? parseInt((el.textContent || "0").replace(/\D/g, ""), 10) : 0;
+        })
+        .catch(() => 0);
+
+      return {
+        found: true,
+        score,
+        solution_rate: score / 10,
+        complaints_count: complaintsCount,
+        summary: `Score: ${score}/10, ${complaintsCount} reclamacoes`,
+      };
+    } finally {
+      await context.close();
+    }
+  };
+
+  const useProxy = isProxyEnabledNow();
+  try {
+    return res.json(await attempt(!useProxy));
+  } catch (err: unknown) {
+    if (useProxy && isProxyFailure(err)) {
+      activateProxyBypass(err);
+      try {
+        const recovered = await attempt(true);
+        console.info(`Reclame Aqui scrape recovered via direct mode (${company_name})`);
+        return res.json(recovered);
+      } catch (directErr: unknown) {
+        const directMsg =
+          directErr instanceof Error ? directErr.message : "unknown error";
+        console.warn(`Reclame Aqui direct retry error (${company_name}): ${directMsg}`);
+      }
+    } else {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      console.warn(`Reclame Aqui scrape error (${company_name}): ${msg}`);
     }
 
-    const score = await page
-      .evaluate(() => {
-        const el = document.querySelector('[data-testid="company-score"]');
-        return el ? parseFloat((el.textContent || "0").replace(",", ".")) : 0;
-      })
-      .catch(() => 0);
-
-    const complaintsCount = await page
-      .evaluate(() => {
-        const el = document.querySelector('[data-testid="complaints-count"]');
-        return el
-          ? parseInt((el.textContent || "0").replace(/\D/g, ""), 10)
-          : 0;
-      })
-      .catch(() => 0);
-
-    return res.json({
-      found: true,
-      score,
-      solution_rate: score / 10,
-      complaints_count: complaintsCount,
-      summary: `Score: ${score}/10, ${complaintsCount} reclamacoes`,
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "unknown error";
-    console.warn(`Reclame Aqui scrape error (${company_name}): ${msg}`);
     return res.json({
       found: false,
       score: 0,
@@ -484,8 +694,6 @@ app.post("/scrape/reclame-aqui", async (req: Request, res: Response) => {
       complaints_count: 0,
       summary: "",
     });
-  } finally {
-    await context.close();
   }
 });
 
@@ -494,35 +702,57 @@ app.post("/scrape/google-search", async (req: Request, res: Response) => {
   const { query, limit = 5 } = req.body as { query?: string; limit?: number };
   if (!query) return res.status(400).json({ error: "query required" });
 
-  const { page, context } = await getPage(randomUA());
+  const attempt = async (useDirect = false) => {
+    const { page, context } = useDirect
+      ? await getDirectPage(randomUA())
+      : await getPage(randomUA());
+    try {
+      const lim = Math.max(1, Math.min(limit ?? 5, 10));
+      const searchURL = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${lim}`;
+      await page.goto(searchURL, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+
+      const results = await page.evaluate((maxCount: number) => {
+        const items = document.querySelectorAll("div.g");
+        return Array.from(items)
+          .slice(0, maxCount)
+          .map((item) => ({
+            title: item.querySelector("h3")?.textContent || "",
+            url: (item.querySelector("a") as HTMLAnchorElement | null)?.href || "",
+            snippet: item.querySelector(".VwiC3b")?.textContent || "",
+          }))
+          .filter((r) => r.title && r.url);
+      }, lim);
+
+      return { results };
+    } finally {
+      await context.close();
+    }
+  };
+
+  const useProxy = isProxyEnabledNow();
   try {
-    const lim = Math.max(1, Math.min(limit ?? 5, 10));
-    const searchURL = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${lim}`;
-    await page.goto(searchURL, {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-
-    const results = await page.evaluate((maxCount: number) => {
-      const items = document.querySelectorAll("div.g");
-      return Array.from(items)
-        .slice(0, maxCount)
-        .map((item) => ({
-          title: item.querySelector("h3")?.textContent || "",
-          url:
-            (item.querySelector("a") as HTMLAnchorElement | null)?.href || "",
-          snippet: item.querySelector(".VwiC3b")?.textContent || "",
-        }))
-        .filter((r) => r.title && r.url);
-    }, lim);
-
-    return res.json({ results });
+    return res.json(await attempt(!useProxy));
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "unknown error";
-    console.warn(`Google search error (${query}): ${msg}`);
+    if (useProxy && isProxyFailure(err)) {
+      activateProxyBypass(err);
+      try {
+        const recovered = await attempt(true);
+        console.info(`Google search recovered via direct mode (${query})`);
+        return res.json(recovered);
+      } catch (directErr: unknown) {
+        const directMsg =
+          directErr instanceof Error ? directErr.message : "unknown error";
+        console.warn(`Google search direct retry error (${query}): ${directMsg}`);
+      }
+    } else {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      console.warn(`Google search error (${query}): ${msg}`);
+    }
+
     return res.status(500).json({ error: "google search failed" });
-  } finally {
-    await context.close();
   }
 });
 
@@ -542,5 +772,15 @@ process.on("SIGTERM", async () => {
   for (const browser of browserPool) {
     await browser.close();
   }
+  if (directBrowser) {
+    await directBrowser.close();
+  }
   process.exit(0);
 });
+
+
+
+
+
+
+

@@ -110,25 +110,27 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		slog.Error("Update stage failed", "company_id", companyID, "error", err)
 	}
 
-	// Generate embedding with independent context to avoid task cancellation races.
-	go func(c db.Company, id uuid.UUID) {
-		embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	if strings.TrimSpace(w.cfg.OpenAIEmbedModel) != "" {
+		// Generate embedding with independent context to avoid task cancellation races.
+		go func(c db.Company, id uuid.UUID) {
+			embedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
-		text := c.Name
-		if c.Address != nil {
-			text += " " + *c.Address
-		}
+			text := c.Name
+			if c.Address != nil {
+				text += " " + *c.Address
+			}
 
-		embedding, err := w.aiClient.Embed(embedCtx, text)
-		if err != nil {
-			slog.Warn("Embedding generation failed", "company_id", id, "error", err)
-			return
-		}
-		if err := w.queries.UpdateCompanyEmbedding(embedCtx, id, embedding); err != nil {
-			slog.Warn("Save embedding failed", "company_id", id, "error", err)
-		}
-	}(company, companyID)
+			embedding, err := w.aiClient.Embed(embedCtx, text)
+			if err != nil {
+				slog.Warn("Embedding generation failed", "company_id", id, "error", err)
+				return
+			}
+			if err := w.queries.UpdateCompanyEmbedding(embedCtx, id, embedding); err != nil {
+				slog.Warn("Save embedding failed", "company_id", id, "error", err)
+			}
+		}(company, companyID)
+	}
 
 	w.broadcaster("ai_analyzed", map[string]interface{}{
 		"company_id": companyID,
@@ -428,3 +430,4 @@ func isGroundedMessageResult(result ai.MessageResult, companyName string, intel 
 
 	return true
 }
+
