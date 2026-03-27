@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
-import { ArrowLeft, Play, Pause } from 'lucide-react';
 import Link from 'next/link';
+import { ArrowLeft, Play, Pause, Radar } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
 
 interface Campaign {
   id: string;
@@ -26,75 +26,104 @@ export default function CampaignDetailPage() {
 
   useEffect(() => {
     if (!id) return;
+
     apiFetch(`/api/campaigns/${id}`)
       .then(setCampaign)
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [id]);
 
-  async function toggle() {
+  async function toggleStatus() {
     if (!campaign) return;
-    const endpoint = campaign.status === 'running' ? `/api/campaigns/${id}/pause` : `/api/campaigns/${id}/start`;
+
+    const endpoint = campaign.status === 'running'
+      ? `/api/campaigns/${id}/pause`
+      : `/api/campaigns/${id}/start`;
+
     await apiFetch(endpoint, { method: 'POST', body: JSON.stringify({}) });
-    setCampaign((prev) => (prev ? { ...prev, status: prev.status === 'running' ? 'paused' : 'running' } : prev));
+
+    setCampaign((prev) => {
+      if (!prev) return prev;
+      return { ...prev, status: prev.status === 'running' ? 'paused' : 'running' };
+    });
   }
 
-  if (loading) return <div className="animate-pulse p-6 text-gray-400">Carregando...</div>;
-  if (!campaign) return <div className="p-6 text-gray-400">Campanha nao encontrada.</div>;
+  if (loading) {
+    return <div className="card animate-pulse p-6 text-sm text-[#9BA7B4]">Carregando campanha...</div>;
+  }
+
+  if (!campaign) {
+    return <div className="card p-6 text-sm text-[#9BA7B4]">Campanha nao encontrada.</div>;
+  }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-5">
       <Link
         href="/dashboard/campaigns"
-        className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-[0.1em] text-[#9BA7B4] transition-colors hover:text-[#E6EDF3]"
       >
-        <ArrowLeft className="w-4 h-4" /> Voltar
+        <ArrowLeft className="h-4 w-4" />
+        VOLTAR PARA CAMPANHAS
       </Link>
 
-      <div className="card">
-        <div className="flex items-start justify-between">
+      <section className="card">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">{campaign.name}</h1>
-            <p className="text-gray-400 mt-1">
-              {campaign.niche} - {campaign.city} (+{campaign.radius_km}km)
+            <p className="text-xs font-semibold tracking-[0.16em] text-[#5C6673]">CAMPAIGN DETAILS</p>
+            <h1 className="mt-1 text-2xl font-semibold text-[#E6EDF3]">{campaign.name}</h1>
+            <p className="mt-1 text-sm text-[#9BA7B4]">
+              {campaign.niche} | {campaign.city} (+{campaign.radius_km}km)
             </p>
           </div>
+
           <button
-            onClick={toggle}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            onClick={toggleStatus}
+            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
               campaign.status === 'running'
-                ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 border border-yellow-500/30'
-                : 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30'
+                ? 'border-[rgba(245,158,11,0.5)] bg-[rgba(245,158,11,0.16)] text-[#F59E0B] hover:bg-[rgba(245,158,11,0.24)]'
+                : 'border-[rgba(34,197,94,0.5)] bg-[rgba(34,197,94,0.16)] text-[#22C55E] hover:bg-[rgba(34,197,94,0.24)]'
             }`}
           >
             {campaign.status === 'running' ? (
               <>
-                <Pause className="w-4 h-4" />
+                <Pause className="h-4 w-4" />
                 Pausar
               </>
             ) : (
               <>
-                <Play className="w-4 h-4" />
+                <Play className="h-4 w-4" />
                 Iniciar
               </>
             )}
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mt-6">
+        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
           {[
             ['Status', campaign.status],
             ['Limite diario', `${campaign.daily_limit} envios`],
-            ['Auto-envio', campaign.auto_send ? 'Sim' : 'Nao'],
+            ['Auto envio', campaign.auto_send ? 'Ativo' : 'Manual'],
+            ['Canais', campaign.channels.join(', ')],
             ['Criada em', new Date(campaign.created_at).toLocaleDateString('pt-BR')],
-          ].map(([k, v]) => (
-            <div key={k} className="bg-surface rounded-lg p-3 border border-surface-border">
-              <p className="text-xs text-gray-500">{k}</p>
-              <p className="text-sm font-medium text-white mt-0.5">{v}</p>
+          ].map(([label, value]) => (
+            <div key={label} className="surface-soft px-3.5 py-3">
+              <p className="text-xs font-semibold tracking-[0.08em] text-[#5C6673]">{label}</p>
+              <p className="mt-1 text-sm font-semibold text-[#E6EDF3]">{value}</p>
             </div>
           ))}
         </div>
-      </div>
+      </section>
+
+      <section className="card border-[rgba(26,167,161,0.36)] bg-[linear-gradient(135deg,rgba(58,47,107,0.2)_0%,rgba(26,167,161,0.16)_100%)]">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(26,167,161,0.45)] bg-[rgba(20,128,124,0.2)]">
+            <Radar className="h-5 w-5 text-[#2ED1C8]" />
+          </div>
+          <p className="text-sm text-[#9BA7B4]">
+            Mantenha campanhas segmentadas por nicho para elevar consistencia de resposta e previsibilidade de funil.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }

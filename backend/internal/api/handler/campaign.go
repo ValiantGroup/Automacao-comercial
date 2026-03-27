@@ -44,13 +44,13 @@ func (h *CampaignHandler) Get(c *fiber.Ctx) error {
 
 func (h *CampaignHandler) Create(c *fiber.Ctx) error {
 	var body struct {
-		Name            string   `json:"name"`
-		Niche           string   `json:"niche"`
-		City            string   `json:"city"`
-		RadiusKM        int32    `json:"radius_km"`
-		DailyLimit      int32    `json:"daily_limit"`
-		AutoSend        bool     `json:"auto_send"`
-		Channels        []string `json:"channels"`
+		Name       string   `json:"name"`
+		Niche      string   `json:"niche"`
+		City       string   `json:"city"`
+		RadiusKM   int32    `json:"radius_km"`
+		DailyLimit int32    `json:"daily_limit"`
+		AutoSend   bool     `json:"auto_send"`
+		Channels   []string `json:"channels"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -108,10 +108,10 @@ func (h *CampaignHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var body struct {
-		Name            *string   `json:"name"`
-		DailyLimit      *int32    `json:"daily_limit"`
-		AutoSend        *bool     `json:"auto_send"`
-		Channels        []string  `json:"channels"`
+		Name       *string  `json:"name"`
+		DailyLimit *int32   `json:"daily_limit"`
+		AutoSend   *bool    `json:"auto_send"`
+		Channels   []string `json:"channels"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})

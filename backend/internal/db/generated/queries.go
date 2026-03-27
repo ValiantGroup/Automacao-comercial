@@ -44,94 +44,94 @@ type User struct {
 }
 
 type Company struct {
-	ID                 uuid.UUID        `json:"id" db:"id"`
-	GooglePlaceID      *string          `json:"google_place_id,omitempty" db:"google_place_id"`
-	Name               string           `json:"name" db:"name"`
-	Phone              *string          `json:"phone,omitempty" db:"phone"`
-	Website            *string          `json:"website,omitempty" db:"website"`
-	Address            *string          `json:"address,omitempty" db:"address"`
-	City               *string          `json:"city,omitempty" db:"city"`
-	State              *string          `json:"state,omitempty" db:"state"`
-	Lat                *float64         `json:"lat,omitempty" db:"lat"`
-	Lng                *float64         `json:"lng,omitempty" db:"lng"`
-	Category           *string          `json:"category,omitempty" db:"category"`
-	GoogleRating       *float32         `json:"google_rating,omitempty" db:"google_rating"`
-	GoogleReviewsCount *int32           `json:"google_reviews_count,omitempty" db:"google_reviews_count"`
-	Niche              *string          `json:"niche,omitempty" db:"niche"`
-	EnrichmentStatus   string           `json:"enrichment_status" db:"enrichment_status"`
-	AIScore            *int32           `json:"ai_score,omitempty" db:"ai_score"`
-	PipelineStage      string           `json:"pipeline_stage" db:"pipeline_stage"`
-	Embedding          []float32        `json:"-" db:"embedding"`
-	CreatedAt          time.Time        `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at" db:"updated_at"`
+	ID                 uuid.UUID `json:"id" db:"id"`
+	GooglePlaceID      *string   `json:"google_place_id,omitempty" db:"google_place_id"`
+	Name               string    `json:"name" db:"name"`
+	Phone              *string   `json:"phone,omitempty" db:"phone"`
+	Website            *string   `json:"website,omitempty" db:"website"`
+	Address            *string   `json:"address,omitempty" db:"address"`
+	City               *string   `json:"city,omitempty" db:"city"`
+	State              *string   `json:"state,omitempty" db:"state"`
+	Lat                *float64  `json:"lat,omitempty" db:"lat"`
+	Lng                *float64  `json:"lng,omitempty" db:"lng"`
+	Category           *string   `json:"category,omitempty" db:"category"`
+	GoogleRating       *float32  `json:"google_rating,omitempty" db:"google_rating"`
+	GoogleReviewsCount *int32    `json:"google_reviews_count,omitempty" db:"google_reviews_count"`
+	Niche              *string   `json:"niche,omitempty" db:"niche"`
+	EnrichmentStatus   string    `json:"enrichment_status" db:"enrichment_status"`
+	AIScore            *int32    `json:"ai_score,omitempty" db:"ai_score"`
+	PipelineStage      string    `json:"pipeline_stage" db:"pipeline_stage"`
+	Embedding          []float32 `json:"-" db:"embedding"`
+	CreatedAt          time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type CompanyIntelligence struct {
-	ID                  uuid.UUID       `json:"id" db:"id"`
-	CompanyID           uuid.UUID       `json:"company_id" db:"company_id"`
-	Summary             *string         `json:"summary,omitempty" db:"summary"`
-	PainPoints          json.RawMessage `json:"pain_points" db:"pain_points"`
-	FitScore            *int32          `json:"fit_score,omitempty" db:"fit_score"`
-	FitJustification    *string         `json:"fit_justification,omitempty" db:"fit_justification"`
-	TechStack           json.RawMessage `json:"tech_stack" db:"tech_stack"`
-	ReputationScore     *float32        `json:"reputation_score,omitempty" db:"reputation_score"`
-	ReputationSummary   *string         `json:"reputation_summary,omitempty" db:"reputation_summary"`
-	OpenJobs            json.RawMessage `json:"open_jobs" db:"open_jobs"`
-	LinkedInFollowers   *int32          `json:"linkedin_followers,omitempty" db:"linkedin_followers"`
-	LinkedInAbout       *string         `json:"linkedin_about,omitempty" db:"linkedin_about"`
-	WebsiteDescription  *string         `json:"website_description,omitempty" db:"website_description"`
-	PersonaPriority     *string         `json:"persona_priority,omitempty" db:"persona_priority"`
-	PersonaJustification *string        `json:"persona_justification,omitempty" db:"persona_justification"`
-	RawWebData          json.RawMessage `json:"raw_web_data,omitempty" db:"raw_web_data"`
-	RawLinkedInData     json.RawMessage `json:"raw_linkedin_data,omitempty" db:"raw_linkedin_data"`
-	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
+	ID                   uuid.UUID       `json:"id" db:"id"`
+	CompanyID            uuid.UUID       `json:"company_id" db:"company_id"`
+	Summary              *string         `json:"summary,omitempty" db:"summary"`
+	PainPoints           json.RawMessage `json:"pain_points" db:"pain_points"`
+	FitScore             *int32          `json:"fit_score,omitempty" db:"fit_score"`
+	FitJustification     *string         `json:"fit_justification,omitempty" db:"fit_justification"`
+	TechStack            json.RawMessage `json:"tech_stack" db:"tech_stack"`
+	ReputationScore      *float32        `json:"reputation_score,omitempty" db:"reputation_score"`
+	ReputationSummary    *string         `json:"reputation_summary,omitempty" db:"reputation_summary"`
+	OpenJobs             json.RawMessage `json:"open_jobs" db:"open_jobs"`
+	LinkedInFollowers    *int32          `json:"linkedin_followers,omitempty" db:"linkedin_followers"`
+	LinkedInAbout        *string         `json:"linkedin_about,omitempty" db:"linkedin_about"`
+	WebsiteDescription   *string         `json:"website_description,omitempty" db:"website_description"`
+	PersonaPriority      *string         `json:"persona_priority,omitempty" db:"persona_priority"`
+	PersonaJustification *string         `json:"persona_justification,omitempty" db:"persona_justification"`
+	RawWebData           json.RawMessage `json:"raw_web_data,omitempty" db:"raw_web_data"`
+	RawLinkedInData      json.RawMessage `json:"raw_linkedin_data,omitempty" db:"raw_linkedin_data"`
+	CreatedAt            time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type Stakeholder struct {
-	ID             uuid.UUID  `json:"id" db:"id"`
-	CompanyID      uuid.UUID  `json:"company_id" db:"company_id"`
-	Name           string     `json:"name" db:"name"`
-	NormalizedRole *string    `json:"normalized_role,omitempty" db:"normalized_role"`
-	RawTitle       *string    `json:"raw_title,omitempty" db:"raw_title"`
-	LinkedInURL    *string    `json:"linkedin_url,omitempty" db:"linkedin_url"`
-	Email          *string    `json:"email,omitempty" db:"email"`
-	Phone          *string    `json:"phone,omitempty" db:"phone"`
-	Source         *string    `json:"source,omitempty" db:"source"`
-	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	ID             uuid.UUID `json:"id" db:"id"`
+	CompanyID      uuid.UUID `json:"company_id" db:"company_id"`
+	Name           string    `json:"name" db:"name"`
+	NormalizedRole *string   `json:"normalized_role,omitempty" db:"normalized_role"`
+	RawTitle       *string   `json:"raw_title,omitempty" db:"raw_title"`
+	LinkedInURL    *string   `json:"linkedin_url,omitempty" db:"linkedin_url"`
+	Email          *string   `json:"email,omitempty" db:"email"`
+	Phone          *string   `json:"phone,omitempty" db:"phone"`
+	Source         *string   `json:"source,omitempty" db:"source"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 }
 
 type Campaign struct {
-	ID               uuid.UUID       `json:"id" db:"id"`
-	Name             string          `json:"name" db:"name"`
-	Niche            string          `json:"niche" db:"niche"`
-	City             string          `json:"city" db:"city"`
-	RadiusKM         int32           `json:"radius_km" db:"radius_km"`
-	Status           string          `json:"status" db:"status"`
-	DailyLimit       int32           `json:"daily_limit" db:"daily_limit"`
-	AutoSend         bool            `json:"auto_send" db:"auto_send"`
-	AIPromptContext  string          `json:"ai_prompt_context" db:"ai_prompt_context"`
-	Channels         json.RawMessage `json:"channels" db:"channels"`
-	CreatedBy        uuid.UUID       `json:"created_by" db:"created_by"`
-	CreatedAt        time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at" db:"updated_at"`
+	ID              uuid.UUID       `json:"id" db:"id"`
+	Name            string          `json:"name" db:"name"`
+	Niche           string          `json:"niche" db:"niche"`
+	City            string          `json:"city" db:"city"`
+	RadiusKM        int32           `json:"radius_km" db:"radius_km"`
+	Status          string          `json:"status" db:"status"`
+	DailyLimit      int32           `json:"daily_limit" db:"daily_limit"`
+	AutoSend        bool            `json:"auto_send" db:"auto_send"`
+	AIPromptContext string          `json:"ai_prompt_context" db:"ai_prompt_context"`
+	Channels        json.RawMessage `json:"channels" db:"channels"`
+	CreatedBy       uuid.UUID       `json:"created_by" db:"created_by"`
+	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type OutreachMessage struct {
-	ID                  uuid.UUID  `json:"id" db:"id"`
-	CompanyID           uuid.UUID  `json:"company_id" db:"company_id"`
-	StakeholderID       *uuid.UUID `json:"stakeholder_id,omitempty" db:"stakeholder_id"`
-	CampaignID          uuid.UUID  `json:"campaign_id" db:"campaign_id"`
-	Channel             string     `json:"channel" db:"channel"`
-	Content             string     `json:"content" db:"content"`
-	Subject             *string    `json:"subject,omitempty" db:"subject"`
-	Status              string     `json:"status" db:"status"`
-	SentAt              *time.Time `json:"sent_at,omitempty" db:"sent_at"`
-	OpenedAt            *time.Time `json:"opened_at,omitempty" db:"opened_at"`
-	RepliedAt           *time.Time `json:"replied_at,omitempty" db:"replied_at"`
-	SendgridMessageID   *string    `json:"sendgrid_message_id,omitempty" db:"sendgrid_message_id"`
-	EvolutionMessageID  *string    `json:"evolution_message_id,omitempty" db:"evolution_message_id"`
-	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	ID                 uuid.UUID  `json:"id" db:"id"`
+	CompanyID          uuid.UUID  `json:"company_id" db:"company_id"`
+	StakeholderID      *uuid.UUID `json:"stakeholder_id,omitempty" db:"stakeholder_id"`
+	CampaignID         uuid.UUID  `json:"campaign_id" db:"campaign_id"`
+	Channel            string     `json:"channel" db:"channel"`
+	Content            string     `json:"content" db:"content"`
+	Subject            *string    `json:"subject,omitempty" db:"subject"`
+	Status             string     `json:"status" db:"status"`
+	SentAt             *time.Time `json:"sent_at,omitempty" db:"sent_at"`
+	OpenedAt           *time.Time `json:"opened_at,omitempty" db:"opened_at"`
+	RepliedAt          *time.Time `json:"replied_at,omitempty" db:"replied_at"`
+	SendgridMessageID  *string    `json:"sendgrid_message_id,omitempty" db:"sendgrid_message_id"`
+	EvolutionMessageID *string    `json:"evolution_message_id,omitempty" db:"evolution_message_id"`
+	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
 }
 
 type PipelineEvent struct {

@@ -2,18 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { CheckCircle, XCircle, MessageSquare, Mail, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, MessageSquare, Mail, RefreshCw, Send } from 'lucide-react';
+import { BrandLogo } from '@/components/brand-logo';
 
 interface PendingMessage {
   id: string;
-  company_id: string;
   channel: string;
   content: string;
   subject: string | null;
-  status: string;
   created_at: string;
-  // Joined
-  company_name?: string;
   stakeholder_name?: string;
 }
 
@@ -36,6 +33,7 @@ export default function OutreachPage() {
 
   async function loadData() {
     setLoading(true);
+
     try {
       const [msgs, s] = await Promise.all([
         apiFetch('/api/outreach/pending-review'),
@@ -75,102 +73,97 @@ export default function OutreachPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">Aprovação de Mensagens</h1>
-          <p className="text-gray-400 mt-1">{messages.length} mensagens aguardando revisão</p>
+          <p className="text-xs font-semibold tracking-[0.16em] text-[#5C6673]">OUTREACH GOVERNANCE</p>
+          <h1 className="mt-1 text-2xl font-semibold text-[#E6EDF3]">Aprovacao de mensagens</h1>
+          <p className="mt-1 text-sm text-[#9BA7B4]">{messages.length} mensagens aguardando validacao</p>
         </div>
-        <button onClick={loadData} className="btn-outline flex items-center gap-2 text-sm">
-          <RefreshCw className="w-4 h-4" /> Atualizar
-        </button>
-      </div>
 
-      {/* Stats */}
+        <button onClick={loadData} className="btn-outline inline-flex items-center gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Atualizar
+        </button>
+      </header>
+
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: 'Pendentes', value: stats.pending_review, color: 'text-amber-400' },
-            { label: 'Enviadas', value: stats.total_sent, color: 'text-blue-400' },
-            { label: 'Abertas', value: stats.total_opened, color: 'text-green-400' },
-            { label: 'Responderam', value: stats.total_replied, color: 'text-brand' },
-          ].map((s) => (
-            <div key={s.label} className="card py-4 text-center">
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
-            </div>
-          ))}
-        </div>
+        <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <Metric title="Pendentes" value={stats.pending_review} className="text-[#F59E0B]" />
+          <Metric title="Enviadas" value={stats.total_sent} className="text-[#38BDF8]" />
+          <Metric title="Abertas" value={stats.total_opened} className="text-[#22C55E]" />
+          <Metric title="Responderam" value={stats.total_replied} className="text-[#2ED1C8]" />
+        </section>
       )}
 
-      {/* Messages */}
       {loading ? (
-        <div className="space-y-3">
+        <section className="space-y-3">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="card h-28 animate-pulse bg-surface-card" />
+            <div key={i} className="card h-[142px] animate-pulse" />
           ))}
-        </div>
+        </section>
       ) : messages.length === 0 ? (
-        <div className="card text-center py-12">
-          <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3 opacity-60" />
-          <p className="text-white font-medium">Nenhuma mensagem pendente</p>
-          <p className="text-sm text-gray-500 mt-1">Todas as mensagens foram revisadas</p>
-        </div>
+        <section className="card relative overflow-hidden py-14 text-center">
+          <div className="mx-auto mb-4 w-16 opacity-55">
+            <BrandLogo mode="icon" muted />
+          </div>
+          <p className="text-lg font-semibold text-[#E6EDF3]">Fila de aprovacao vazia</p>
+          <p className="mt-1 text-sm text-[#9BA7B4]">Todas as mensagens foram processadas.</p>
+        </section>
       ) : (
-        <div className="space-y-3">
+        <section className="space-y-3">
           {messages.map((msg) => (
-            <div key={msg.id} className="card animate-fade-in border-l-4 border-l-amber-500/50">
-              {/* Header */}
-              <div className="flex items-center justify-between mb-3">
+            <article key={msg.id} className="card border-l-2 border-l-[rgba(245,158,11,0.55)]">
+              <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  {msg.channel === 'whatsapp' ? (
-                    <span className="badge bg-green-500/20 text-green-400 flex items-center gap-1">
-                      <MessageSquare className="w-3 h-3" /> WhatsApp
-                    </span>
-                  ) : (
-                    <span className="badge bg-blue-500/20 text-blue-400 flex items-center gap-1">
-                      <Mail className="w-3 h-3" /> Email
-                    </span>
-                  )}
+                  <span className={`badge ${msg.channel === 'whatsapp' ? 'badge-success' : 'badge-info'}`}>
+                    {msg.channel === 'whatsapp' ? 'WhatsApp' : 'Email'}
+                  </span>
                   {msg.stakeholder_name && (
-                    <span className="text-sm text-gray-300">Para: <strong>{msg.stakeholder_name}</strong></span>
+                    <span className="text-sm text-[#9BA7B4]">
+                      Para <strong className="text-[#E6EDF3]">{msg.stakeholder_name}</strong>
+                    </span>
                   )}
                 </div>
-                <span className="text-xs text-gray-500">
-                  {new Date(msg.created_at).toLocaleDateString('pt-BR')}
-                </span>
+                <span className="text-xs text-[#5C6673]">{new Date(msg.created_at).toLocaleDateString('pt-BR')}</span>
               </div>
 
-              {/* Content */}
-              {msg.subject && (
-                <p className="text-sm font-semibold text-gray-200 mb-1">Assunto: {msg.subject}</p>
-              )}
-              <p className="text-sm text-gray-300 leading-relaxed bg-surface rounded-lg p-3 border border-surface-border">
+              {msg.subject && <p className="mb-1 text-sm font-semibold text-[#E6EDF3]">Assunto: {msg.subject}</p>}
+              <p className="rounded-xl border border-[#1F2937] bg-[rgba(18,24,33,0.68)] p-3 text-sm leading-relaxed text-[#9BA7B4]">
                 {msg.content}
               </p>
 
-              {/* Actions */}
-              <div className="flex gap-2 mt-3 justify-end">
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                 <button
                   onClick={() => reject(msg.id)}
                   disabled={processing === msg.id}
-                  className="flex items-center gap-1.5 text-sm text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[rgba(239,68,68,0.45)] bg-[rgba(239,68,68,0.12)] px-3 py-2 text-xs font-semibold text-[#EF4444] transition-colors hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-60"
                 >
-                  <XCircle className="w-4 h-4" /> Rejeitar
+                  <XCircle className="h-4 w-4" />
+                  Rejeitar
                 </button>
                 <button
                   onClick={() => approve(msg.id)}
                   disabled={processing === msg.id}
-                  className="btn-primary flex items-center gap-1.5 text-sm py-1.5 px-3 disabled:opacity-50"
+                  className="btn-primary inline-flex items-center gap-1.5 text-xs disabled:opacity-60"
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  {processing === msg.id ? 'Enviando...' : 'Aprovar & Enviar'}
+                  <Send className="h-4 w-4" />
+                  {processing === msg.id ? 'Enviando...' : 'Aprovar e enviar'}
                 </button>
               </div>
-            </div>
+            </article>
           ))}
-        </div>
+        </section>
       )}
     </div>
+  );
+}
+
+function Metric({ title, value, className }: { title: string; value: number; className: string }) {
+  return (
+    <article className="card px-4 py-4 text-center">
+      <p className={`text-2xl font-semibold ${className}`}>{value.toLocaleString('pt-BR')}</p>
+      <p className="mt-1 text-[0.72rem] font-semibold tracking-[0.1em] text-[#5C6673]">{title}</p>
+    </article>
   );
 }
