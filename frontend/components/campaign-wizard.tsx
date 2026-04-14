@@ -18,6 +18,9 @@ interface FormData {
   city: string;
   radius_km: number;
   daily_limit: number;
+  min_google_reviews: number;
+  max_companies: number;
+  min_ai_score_for_stakeholders: number;
   auto_send: boolean;
   channels: string[];
 }
@@ -28,6 +31,9 @@ const DEFAULT_FORM: FormData = {
   city: '',
   radius_km: 10,
   daily_limit: 50,
+  min_google_reviews: 100,
+  max_companies: 60,
+  min_ai_score_for_stakeholders: 60,
   auto_send: false,
   channels: ['whatsapp'],
 };
@@ -40,6 +46,11 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
 
   function update(key: keyof FormData, value: string | number | boolean | string[]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function parseNumberInput(value: string, fallback: number) {
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? fallback : parsed;
   }
 
   function toggleChannel(ch: string) {
@@ -158,7 +169,7 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
                     min="1"
                     max="100"
                     value={form.radius_km}
-                    onChange={(e) => update('radius_km', parseInt(e.target.value || '10', 10))}
+                    onChange={(e) => update('radius_km', parseNumberInput(e.target.value, 10))}
                   />
                 </div>
               </div>
@@ -175,8 +186,49 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
                   min="1"
                   max="500"
                   value={form.daily_limit}
-                  onChange={(e) => update('daily_limit', parseInt(e.target.value || '50', 10))}
+                  onChange={(e) => update('daily_limit', parseNumberInput(e.target.value, 50))}
                 />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold tracking-[0.08em] text-[#9BA7B4]">MIN AVALIACOES GOOGLE</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    max="50000"
+                    value={form.min_google_reviews}
+                    onChange={(e) => update('min_google_reviews', Math.max(0, parseNumberInput(e.target.value, 100)))}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold tracking-[0.08em] text-[#9BA7B4]">MAX EMPRESAS</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={form.max_companies}
+                    onChange={(e) => update('max_companies', Math.max(1, parseNumberInput(e.target.value, 60)))}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold tracking-[0.08em] text-[#9BA7B4]">MIN IA STAKEHOLDERS</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="60"
+                    max="100"
+                    value={form.min_ai_score_for_stakeholders}
+                    onChange={(e) =>
+                      update(
+                        'min_ai_score_for_stakeholders',
+                        Math.min(100, Math.max(60, parseNumberInput(e.target.value, 60))),
+                      )
+                    }
+                  />
+                </div>
               </div>
 
               <div>
@@ -235,6 +287,9 @@ export function CampaignWizard({ onClose, onCreated }: Props) {
                   ['Nicho', form.niche],
                   ['Cobertura', `${form.city} (+${form.radius_km}km)`],
                   ['Capacidade', `${form.daily_limit} envios/dia`],
+                  ['Min avaliacoes Google', `${form.min_google_reviews}`],
+                  ['Max empresas', `${form.max_companies}`],
+                  ['Nota minima IA (stakeholders)', `${form.min_ai_score_for_stakeholders}`],
                   ['Canais', form.channels.join(', ')],
                   ['Auto envio', form.auto_send ? 'Ativo' : 'Manual'],
                 ].map(([k, v]) => (

@@ -114,37 +114,33 @@ func (w *linkedInWorker) Handle(ctx context.Context, t *asynq.Task) error {
 
 	slog.Info("LinkedIn enrichment done", "company_id", companyID, "stakeholders", len(candidates), "provider", providerUsed)
 
-	// Check if web enrichment is also done so we can trigger AI analysis
-	w.maybeEnqueueAnalysis(ctx, companyID, p.CampaignID)
+	if err := w.enqueueMessageGeneration(companyID, p.CampaignID); err != nil {
+		slog.Error("Enqueue AI generate after stakeholder enrichment failed", "company_id", companyID, "error", err)
+	}
 
 	return nil
 }
 
-func (w *linkedInWorker) maybeEnqueueAnalysis(ctx context.Context, companyID uuid.UUID, campaignID string) {
-	company, err := w.queries.GetCompany(ctx, companyID)
+func (w *linkedInWorker) enqueueMessageGeneration(companyID uuid.UUID, campaignID string) error {
+	if strings.TrimSpace(campaignID) == "" {
+		return nil
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"company_id":  companyID.String(),
+		"campaign_id": campaignID,
+	})
 	if err != nil {
-		return
+		return fmt.Errorf("marshal AI generate payload: %w", err)
 	}
-	// If both enrichments are done or intelligence already exists, trigger analysis
-	if company.EnrichmentStatus == "processing" {
-		payload, err := json.Marshal(map[string]string{
-			"company_id":  companyID.String(),
-			"campaign_id": campaignID,
-		})
-		if err != nil {
-			slog.Error("Marshal AI analyze payload failed", "company_id", companyID, "error", err)
-			return
-		}
-		if _, err := w.client.Enqueue(
-			asynq.NewTask(TaskAIAnalyze, payload),
-			asynq.MaxRetry(3),
-			asynq.Queue("ai"),
-			asynq.Unique(30*time.Second),
-			asynq.ProcessIn(5*time.Second), // small delay for web worker to finish
-		); err != nil {
-			if !errors.Is(err, asynq.ErrDuplicateTask) {
-				slog.Error("Enqueue AI analyze failed", "company_id", companyID, "error", err)
-			}
-		}
+
+	if _, err := w.client.Enqueue(
+		asynq.NewTask(TaskAIGenerate, payload),
+		asynq.MaxRetry(3),
+		asynq.Queue("ai"),
+		asynq.Unique(30*time.Second),
+	); err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
+		return fmt.Errorf("enqueue AI generate task: %w", err)
 	}
+	return nil
 }

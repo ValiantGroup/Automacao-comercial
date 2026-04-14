@@ -55,6 +55,7 @@ func RegisterRoutes(
 	campaigns.Get("/", campaignHandler.List)
 	campaigns.Post("/", campaignHandler.Create)
 	campaigns.Get("/:id", campaignHandler.Get)
+	campaigns.Get("/:id/progress", campaignHandler.Progress)
 	campaigns.Patch("/:id", campaignHandler.Update)
 	campaigns.Delete("/:id", campaignHandler.Delete)
 	campaigns.Post("/:id/start", campaignHandler.Start)

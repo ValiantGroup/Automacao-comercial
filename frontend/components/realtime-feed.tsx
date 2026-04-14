@@ -18,6 +18,10 @@ const EVENT_LABELS: Record<string, string> = {
   message_approved: 'Mensagem aprovada',
   stage_changed: 'Estagio atualizado',
   enrichment_done: 'Enriquecimento concluido',
+  campaign_search_started: 'Busca de campanha iniciada',
+  campaign_search_progress: 'Busca de campanha em progresso',
+  campaign_search_finished: 'Busca de campanha finalizada',
+  campaign_search_limit_reached: 'Limite de campanha atingido',
 };
 
 const WS_URL = typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3000' : '';
@@ -87,7 +91,14 @@ export function RealtimeFeed() {
               events.map((ev) => (
                 <article key={ev.id} className="px-4 py-3 transition-colors hover:bg-[rgba(26,35,48,0.75)]">
                   <p className="text-sm font-medium text-[#E6EDF3]">{EVENT_LABELS[ev.type] || ev.type}</p>
-                  {ev.payload?.company_name && <p className="mt-0.5 text-xs text-[#9BA7B4]">{ev.payload.company_name}</p>}
+                  {(ev.payload?.company_name || ev.payload?.name || ev.payload?.campaign_id) && (
+                    <p className="mt-0.5 text-xs text-[#9BA7B4]">
+                      {ev.payload?.company_name || ev.payload?.name || `Campanha ${String(ev.payload?.campaign_id).slice(0, 8)}`}
+                    </p>
+                  )}
+                  {ev.payload?.reason && (
+                    <p className="mt-0.5 text-[0.68rem] text-[#5C6673]">motivo: {String(ev.payload.reason)}</p>
+                  )}
                   <p className="mt-1 text-[0.7rem] tracking-[0.08em] text-[#5C6673]">
                     {ev.time.toLocaleTimeString('pt-BR')}
                   </p>

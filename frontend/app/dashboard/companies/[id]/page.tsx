@@ -10,8 +10,10 @@ import {
   MapPin,
   Star,
   Brain,
-  Users,
-  MessageSquare,
+  Mail,
+  AlertTriangle,
+  Link2,
+  ShieldAlert,
   Clock,
   Building2,
 } from 'lucide-react';
@@ -44,6 +46,99 @@ interface Intelligence {
   linkedin_about: string | null;
   website_description: string | null;
   persona_priority: string | null;
+  raw_web_data?: RawWebData | null;
+}
+
+interface RawWebData {
+  captured_at?: string;
+  website_url?: string | null;
+  website_description?: string;
+  tech_stack?: string[];
+  reputation_summary?: string;
+  website?: {
+    title?: string;
+    description?: string;
+    text_content?: string;
+    technologies?: string[];
+    links?: string[];
+    final_url?: string;
+    source?: string;
+    pages_count?: number;
+    pages_scanned?: string[];
+    scanned_page_summaries?: Array<{
+      url?: string;
+      title?: string;
+      description?: string;
+    }>;
+    headings?: {
+      h1?: string[];
+      h2?: string[];
+      h3?: string[];
+    };
+    contact_signals?: {
+      emails?: string[];
+      phones?: string[];
+      whatsapp_numbers?: string[];
+      addresses?: string[];
+      social_links?: string[];
+      contact_pages?: string[];
+    };
+    site_signals?: {
+      has_contact_form?: boolean;
+      has_whatsapp_cta?: boolean;
+      has_live_chat?: boolean;
+      has_about_page?: boolean;
+      has_blog?: boolean;
+      has_careers_page?: boolean;
+      has_privacy_policy?: boolean;
+      has_terms_page?: boolean;
+      has_robots_meta?: boolean;
+      has_favicon?: boolean;
+      is_https?: boolean;
+    };
+    business_signals?: {
+      what_company_does?: string[];
+      value_propositions?: string[];
+      target_market_hints?: string[];
+      location_hints?: string[];
+      cta_phrases?: string[];
+    };
+    issues?: Array<{
+      code?: string;
+      severity?: string;
+      message?: string;
+    }>;
+  };
+  reclame_aqui?: {
+    found?: boolean;
+    profile_url?: string;
+    company_name?: string;
+    company_slug?: string;
+    score?: number;
+    solution_rate?: number;
+    complaints_count?: number;
+    responded_percentage?: number | null;
+    would_do_business_again_percentage?: number | null;
+    consumer_score?: number | null;
+    response_time_text?: string;
+    response_time_days?: number | null;
+    complaint_topics?: string[];
+    recent_complaints?: string[];
+    summary?: string;
+    indicators?: Record<string, string>;
+  };
+  derived?: {
+    what_company_does?: string[];
+    location_hints?: string[];
+    site_issues?: string[];
+    pain_signals?: string[];
+    ai_about_company?: string;
+    ai_what_company_does?: string[];
+    ai_core_offers?: string[];
+    ai_location_hints?: string[];
+    ai_pain_hypotheses?: string[];
+    ai_confidence?: number;
+  };
 }
 
 interface Stakeholder {
@@ -78,6 +173,59 @@ function statusBadgeClass(status: string) {
   if (status === 'pending_review') return 'badge-warning';
   if (status === 'failed') return 'badge-danger';
   return 'badge-neutral';
+}
+
+function issueBadgeClass(severity: string | undefined) {
+  if (severity === 'high') return 'badge-danger';
+  if (severity === 'medium') return 'badge-warning';
+  if (severity === 'low') return 'badge-info';
+  return 'badge-neutral';
+}
+
+function uniq(values: string[] = []) {
+  return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean)));
+}
+
+function isLikelyNoiseText(text: string): boolean {
+  const value = (text || '').toLowerCase().trim();
+  if (!value) return true;
+  return (
+    value.includes('404') ||
+    value.includes('page not found') ||
+    value.includes('pagina nao encontrada') ||
+    value.includes('oops') ||
+    value.includes('clique aqui')
+  );
+}
+
+function normalizeComparableIssue(text: string): string {
+  return text
+    .replace(/^\s*\[[A-Z]+\]\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeURLValue(raw: string): string {
+  const value = (raw || '').trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    parsed.hash = '';
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid'].forEach((param) =>
+      parsed.searchParams.delete(param),
+    );
+    if (parsed.pathname !== '/' && parsed.pathname.endsWith('/')) {
+      parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    }
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+}
+
+function uniqURLs(values: string[] = []) {
+  return Array.from(new Set(values.map((v) => normalizeURLValue(v)).filter(Boolean)));
 }
 
 export default function CompanyDetailPage() {
@@ -129,6 +277,85 @@ export default function CompanyDetailPage() {
 
     return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [company, messages]);
+
+  const rawWeb = intel?.raw_web_data || null;
+  const websiteData = rawWeb?.website;
+  const reclameAquiData = rawWeb?.reclame_aqui;
+  const aboutCompany = rawWeb?.derived?.ai_about_company || intel?.website_description || rawWeb?.website_description || null;
+  const coreOffers = useMemo(
+    () => uniq(rawWeb?.derived?.ai_core_offers || []).filter((value) => !isLikelyNoiseText(value)).slice(0, 10),
+    [rawWeb],
+  );
+
+  const whatCompanyDoes = useMemo(
+    () =>
+      uniq([
+        ...(rawWeb?.derived?.ai_what_company_does || []),
+        ...(rawWeb?.derived?.what_company_does || []),
+        ...(websiteData?.business_signals?.what_company_does || []),
+        ...(websiteData?.headings?.h1 || []),
+      ])
+        .filter((value) => !isLikelyNoiseText(value))
+        .slice(0, 10),
+    [rawWeb, websiteData],
+  );
+
+  const locationHints = useMemo(
+    () =>
+      uniq([
+        ...(rawWeb?.derived?.ai_location_hints || []),
+        ...(rawWeb?.derived?.location_hints || []),
+        ...(websiteData?.business_signals?.location_hints || []),
+        ...(websiteData?.contact_signals?.addresses || []),
+      ])
+        .filter((value) => !isLikelyNoiseText(value))
+        .slice(0, 8),
+    [rawWeb, websiteData],
+  );
+
+  const contactSignals = useMemo(
+    () => ({
+      emails: uniq(websiteData?.contact_signals?.emails || []),
+      phones: uniq(websiteData?.contact_signals?.phones || []),
+      whatsapp: uniq(websiteData?.contact_signals?.whatsapp_numbers || []),
+      social: uniqURLs(websiteData?.contact_signals?.social_links || []),
+      pages: uniqURLs(websiteData?.contact_signals?.contact_pages || []),
+    }),
+    [websiteData],
+  );
+
+  const websiteIssues = useMemo(() => {
+    const merged = [
+      ...(websiteData?.issues || []).map((issue) => ({
+        severity: issue.severity || 'unknown',
+        message: issue.message || issue.code || 'Issue detectada',
+      })),
+      ...(rawWeb?.derived?.site_issues || []).map((message) => ({
+        severity: 'unknown',
+        message,
+      })),
+    ].filter((issue) => issue.message && issue.message.trim().length > 0);
+
+    const unique: Array<{ severity: string; message: string }> = [];
+    const seen = new Set<string>();
+    merged.forEach((issue) => {
+      const key = normalizeComparableIssue(issue.message);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      unique.push(issue);
+    });
+    return unique.slice(0, 18);
+  }, [websiteData, rawWeb]);
+
+  const relevantLinks = useMemo(
+    () => uniqURLs(websiteData?.links || []).slice(0, 24),
+    [websiteData],
+  );
+
+  const scannedPages = useMemo(
+    () => uniqURLs(websiteData?.pages_scanned || []),
+    [websiteData],
+  );
 
   if (loading) {
     return (
@@ -288,6 +515,262 @@ export default function CompanyDetailPage() {
           <div className="card">
             <h4 className="text-sm font-semibold text-[#E6EDF3]">Reputacao e sinais externos</h4>
             <p className="mt-2 text-sm text-[#9BA7B4]">{intel?.reputation_summary || 'Sem dados de reputacao para esta empresa.'}</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="card">
+              <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-[#E6EDF3]">
+                <Brain className="h-4 w-4 text-[#2ED1C8]" />
+                O que a empresa faz
+              </h4>
+              {aboutCompany && (
+                <p className="mt-3 text-sm leading-relaxed text-[#9BA7B4]">{aboutCompany}</p>
+              )}
+              {whatCompanyDoes.length > 0 ? (
+                <ul className="mt-3 space-y-2">
+                  {whatCompanyDoes.map((item, idx) => (
+                    <li key={`${item}-${idx}`} className="flex items-start gap-2 text-sm text-[#9BA7B4]">
+                      <span className="mt-[7px] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#2ED1C8]" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-[#5C6673]">
+                  Sem inferencia clara da atuacao no site.
+                </p>
+              )}
+
+              {coreOffers.length > 0 && (
+                <div className="mt-4">
+                  <p className="mb-2 text-xs font-semibold tracking-[0.08em] text-[#5C6673]">OFERTAS E FRENTES PRINCIPAIS</p>
+                  <div className="flex flex-wrap gap-2">
+                    {coreOffers.map((offer) => (
+                      <span key={offer} className="badge badge-info">
+                        {offer}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {locationHints.length > 0 && (
+                <div className="mt-4">
+                  <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold tracking-[0.08em] text-[#5C6673]">
+                    <MapPin className="h-3.5 w-3.5" />
+                    PISTAS DE LOCALIZACAO
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {locationHints.map((hint) => (
+                      <span key={hint} className="badge badge-info">
+                        {hint}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-[#E6EDF3]">
+                <Mail className="h-4 w-4 text-[#2ED1C8]" />
+                Contatos detectados no site
+              </h4>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-[#9BA7B4]">
+                <p>Emails: <span className="font-semibold text-[#E6EDF3]">{contactSignals.emails.length}</span></p>
+                <p>Telefones: <span className="font-semibold text-[#E6EDF3]">{contactSignals.phones.length}</span></p>
+                <p>WhatsApp: <span className="font-semibold text-[#E6EDF3]">{contactSignals.whatsapp.length}</span></p>
+              </div>
+
+              {(contactSignals.emails.length > 0 || contactSignals.phones.length > 0 || contactSignals.whatsapp.length > 0) ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {contactSignals.emails.map((email) => (
+                    <span key={email} className="badge badge-info">{email}</span>
+                  ))}
+                  {contactSignals.phones.map((phone) => (
+                    <span key={phone} className="badge badge-neutral">{phone}</span>
+                  ))}
+                  {contactSignals.whatsapp.map((wa) => (
+                    <span key={wa} className="badge badge-success">{wa}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-[#5C6673]">Nenhum contato explicito detectado no site.</p>
+              )}
+
+              {(contactSignals.pages.length > 0 || contactSignals.social.length > 0) && (
+                <div className="mt-4 space-y-2">
+                  {contactSignals.pages.length > 0 && (
+                    <div>
+                      <p className="mb-1 text-xs font-semibold tracking-[0.08em] text-[#5C6673]">PAGINAS DE CONTATO</p>
+                      <div className="flex flex-wrap gap-2">
+                        {contactSignals.pages.map((url) => (
+                          <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="badge badge-info hover:opacity-90">
+                            {url}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {contactSignals.social.length > 0 && (
+                    <div>
+                      <p className="mb-1 text-xs font-semibold tracking-[0.08em] text-[#5C6673]">REDES SOCIAIS</p>
+                      <div className="flex flex-wrap gap-2">
+                        {contactSignals.social.map((url) => (
+                          <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="badge badge-neutral hover:opacity-90">
+                            {url}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-[#E6EDF3]">
+              <AlertTriangle className="h-4 w-4 text-[#F59E0B]" />
+              Problemas detectados no site
+            </h4>
+            {websiteIssues.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {websiteIssues.map((issue, idx) => (
+                  <div key={`${issue.message}-${idx}`} className="flex flex-wrap items-start gap-2">
+                    <span className={`badge ${issueBadgeClass(issue.severity)}`}>{issue.severity}</span>
+                    <p className="flex-1 text-sm text-[#9BA7B4]">{issue.message}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-[#5C6673]">Nenhum problema explicito detectado pelo crawler.</p>
+            )}
+          </div>
+
+          <div className="card">
+            <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-[#E6EDF3]">
+              <ShieldAlert className="h-4 w-4 text-[#2ED1C8]" />
+              Reclame Aqui detalhado
+            </h4>
+
+            {reclameAquiData?.found ? (
+              <div className="mt-3 space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {typeof reclameAquiData.score === 'number' && (
+                    <span className="badge badge-warning">Nota {reclameAquiData.score.toFixed(1)}/10</span>
+                  )}
+                  {typeof reclameAquiData.solution_rate === 'number' && (
+                    <span className="badge badge-info">Solucao {(reclameAquiData.solution_rate * 100).toFixed(0)}%</span>
+                  )}
+                  {typeof reclameAquiData.complaints_count === 'number' && (
+                    <span className="badge badge-neutral">{reclameAquiData.complaints_count} reclamacoes</span>
+                  )}
+                  {typeof reclameAquiData.responded_percentage === 'number' && (
+                    <span className="badge badge-info">{reclameAquiData.responded_percentage.toFixed(0)}% respondidas</span>
+                  )}
+                </div>
+
+                {reclameAquiData.profile_url && (
+                  <a
+                    href={reclameAquiData.profile_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-[#2ED1C8] hover:text-[#7EE7E2]"
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    ABRIR PERFIL NO RECLAME AQUI
+                  </a>
+                )}
+
+                {reclameAquiData.complaint_topics && reclameAquiData.complaint_topics.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-xs font-semibold tracking-[0.08em] text-[#5C6673]">TOPICOS RECORRENTES</p>
+                    <div className="flex flex-wrap gap-2">
+                      {reclameAquiData.complaint_topics.map((topic) => (
+                        <span key={topic} className="badge badge-danger">
+                          {topic}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {reclameAquiData.recent_complaints && reclameAquiData.recent_complaints.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-xs font-semibold tracking-[0.08em] text-[#5C6673]">RECLAMACOES RECENTES</p>
+                    <ul className="space-y-1.5">
+                      {reclameAquiData.recent_complaints.slice(0, 8).map((complaint, idx) => (
+                        <li key={`${complaint}-${idx}`} className="text-sm text-[#9BA7B4]">
+                          - {complaint}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-[#5C6673]">Sem perfil validado no Reclame Aqui para esta empresa.</p>
+            )}
+          </div>
+
+          <div className="card">
+            <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-[#E6EDF3]">
+              <Link2 className="h-4 w-4 text-[#2ED1C8]" />
+              Links mapeados no site
+            </h4>
+            {typeof websiteData?.pages_count === 'number' && websiteData.pages_count > 0 && (
+              <p className="mt-2 text-xs text-[#5C6673]">
+                Paginas internas varridas: {websiteData.pages_count}
+              </p>
+            )}
+
+            {websiteData?.scanned_page_summaries && websiteData.scanned_page_summaries.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {websiteData.scanned_page_summaries.slice(0, 8).map((page, idx) => (
+                  <p key={`${page.url || 'page'}-${idx}`} className="text-xs text-[#9BA7B4]">
+                    {page.title || page.url || `Pagina ${idx + 1}`}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {scannedPages.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {scannedPages.slice(0, 12).map((url) => (
+                  <a
+                    key={`scan-${url}`}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="badge badge-neutral hover:opacity-90"
+                  >
+                    {url}
+                  </a>
+                ))}
+              </div>
+            )}
+
+            {relevantLinks.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {relevantLinks.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[#1F2937] bg-[rgba(18,24,33,0.6)] px-2.5 py-1 text-xs text-[#9BA7B4] hover:text-[#E6EDF3]"
+                    title={url}
+                  >
+                    <Globe className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate">{url}</span>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-[#5C6673]">Nenhum link adicional mapeado no crawl.</p>
+            )}
           </div>
         </section>
       )}

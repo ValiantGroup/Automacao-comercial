@@ -114,11 +114,9 @@ func isHunterQuotaError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return (
-		strings.Contains(msg, "too_many_requests") ||
-			strings.Contains(msg, "rate limit") ||
-			strings.Contains(msg, "usage limit") ||
-			strings.Contains(msg, "error 429") ||
-			strings.Contains(msg, "api 429")
-	)
+	return strings.Contains(msg, "too_many_requests") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "usage limit") ||
+		strings.Contains(msg, "error 429") ||
+		strings.Contains(msg, "api 429")
 }

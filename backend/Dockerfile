@@ -20,5 +20,7 @@ CMD ["/bin/worker"]
 
 # ─── Migration runner ─────────────────────────────────────────────────────────
 FROM base AS migrate
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.1
+# Some networks block sum.golang.org; disabling checksum DB here avoids
+# build failures in constrained environments while keeping behavior unchanged.
+RUN GOSUMDB=off go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.17.1
 CMD migrate -path ./migrations -database "$DATABASE_URL" up

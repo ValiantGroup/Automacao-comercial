@@ -17,6 +17,7 @@ import (
 )
 
 const aiGlobalContextSettingKey = "ai_global_context"
+const defaultStakeholderAIScoreThreshold int32 = 60
 
 type aiWorker struct {
 	cfg         *config.Config
@@ -57,6 +58,11 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 	if err != nil {
 		slog.Warn("Intelligence not found for analysis, proceeding with minimal data", "company_id", companyID)
 		intel.CompanyID = companyID
+	}
+	if enrichedIntel, err := w.enrichWebsiteNarrativeWithAI(ctx, company, intel); err != nil {
+		slog.Warn("AI website narrative enrichment failed", "company_id", companyID, "error", err)
+	} else {
+		intel = enrichedIntel
 	}
 
 	stakeholders, _ := w.queries.ListStakeholdersByCompany(ctx, companyID)
@@ -132,29 +138,53 @@ func (w *aiWorker) Handle(ctx context.Context, t *asynq.Task) error {
 		}(company, companyID)
 	}
 
+	campaignID := uuid.Nil
+	if parsedCampaignID, parseErr := uuid.Parse(p.CampaignID); parseErr == nil {
+		campaignID = parsedCampaignID
+	}
+	minStakeholderAIScore := defaultStakeholderAIScoreThreshold
+	if campaignID != uuid.Nil {
+		campaign, campaignErr := w.queries.GetCampaign(ctx, campaignID)
+		if campaignErr != nil {
+			slog.Warn("Get campaign failed while resolving stakeholder threshold", "campaign_id", campaignID, "error", campaignErr)
+		} else {
+			minStakeholderAIScore = campaign.MinAIScoreStakeholders
+		}
+	}
+
 	w.broadcaster("ai_analyzed", map[string]interface{}{
-		"company_id": companyID,
-		"name":       company.Name,
-		"fit_score":  result.FitScore,
+		"company_id":   companyID,
+		"company_name": company.Name,
+		"campaign_id":  campaignID,
+		"fit_score":    result.FitScore,
 	})
 
-	generatePayload, err := json.Marshal(map[string]string{
-		"company_id":  companyID.String(),
-		"campaign_id": p.CampaignID,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal generate payload: %w", err)
+	if int32(result.FitScore) >= minStakeholderAIScore && campaignID != uuid.Nil {
+		linkedinPayload, err := json.Marshal(map[string]string{
+			"company_id":  companyID.String(),
+			"campaign_id": campaignID.String(),
+		})
+		if err != nil {
+			return fmt.Errorf("marshal linkedin payload: %w", err)
+		}
+		if _, err := w.client.Enqueue(
+			asynq.NewTask(TaskEnrichLinkedIn, linkedinPayload),
+			asynq.MaxRetry(3),
+			asynq.Queue("enrichment"),
+			asynq.Unique(30*time.Second),
+		); err != nil {
+			slog.Error("Enqueue linkedin enrichment failed", "company_id", companyID, "campaign_id", campaignID, "error", err)
+			return w.enqueueGenerateTask(companyID, campaignID.String())
+		}
+		slog.Info("Stakeholder search queued after AI threshold", "company_id", companyID, "campaign_id", campaignID, "fit_score", result.FitScore, "min_ai_score", minStakeholderAIScore)
+		return nil
 	}
 
-	if _, err := w.client.Enqueue(
-		asynq.NewTask(TaskAIGenerate, generatePayload),
-		asynq.MaxRetry(3),
-		asynq.Queue("ai"),
-	); err != nil {
-		slog.Error("Enqueue AI generate failed", "company_id", companyID, "error", err)
+	if int32(result.FitScore) < minStakeholderAIScore {
+		slog.Info("Skipping stakeholder search due AI threshold", "company_id", companyID, "fit_score", result.FitScore, "min_ai_score", minStakeholderAIScore)
 	}
 
-	return nil
+	return w.enqueueGenerateTask(companyID, p.CampaignID)
 }
 
 // --- Generate ----------------------------------------------------------------
@@ -290,9 +320,29 @@ func (w *aiWorker) persistGeneratedMessages(ctx context.Context, companyID uuid.
 	w.broadcaster("message_generated", map[string]interface{}{
 		"company_id":   companyID,
 		"company_name": companyName,
+		"campaign_id":  campaignID,
 	})
 
 	slog.Info("Messages generated and saved as pending_review", "company_id", companyID)
+	return nil
+}
+
+func (w *aiWorker) enqueueGenerateTask(companyID uuid.UUID, campaignID string) error {
+	generatePayload, err := json.Marshal(map[string]string{
+		"company_id":  companyID.String(),
+		"campaign_id": campaignID,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal generate payload: %w", err)
+	}
+
+	if _, err := w.client.Enqueue(
+		asynq.NewTask(TaskAIGenerate, generatePayload),
+		asynq.MaxRetry(3),
+		asynq.Queue("ai"),
+	); err != nil {
+		slog.Error("Enqueue AI generate failed", "company_id", companyID, "error", err)
+	}
 	return nil
 }
 
@@ -308,14 +358,20 @@ func (w *aiWorker) resolveGlobalAIContext(ctx context.Context) string {
 }
 
 type compactIntelligenceForMessage struct {
-	Summary          *string  `json:"summary,omitempty"`
-	PainPoints       []string `json:"pain_points,omitempty"`
-	FitScore         *int32   `json:"fit_score,omitempty"`
-	FitJustification *string  `json:"fit_justification,omitempty"`
-	TechStack        []string `json:"tech_stack,omitempty"`
-	Reputation       *string  `json:"reputation_summary,omitempty"`
-	Website          *string  `json:"website_description,omitempty"`
-	LinkedIn         *string  `json:"linkedin_about,omitempty"`
+	Summary                *string  `json:"summary,omitempty"`
+	PainPoints             []string `json:"pain_points,omitempty"`
+	FitScore               *int32   `json:"fit_score,omitempty"`
+	FitJustification       *string  `json:"fit_justification,omitempty"`
+	TechStack              []string `json:"tech_stack,omitempty"`
+	Reputation             *string  `json:"reputation_summary,omitempty"`
+	Website                *string  `json:"website_description,omitempty"`
+	LinkedIn               *string  `json:"linkedin_about,omitempty"`
+	WebsiteIssues          []string `json:"website_issues,omitempty"`
+	WebsiteContacts        []string `json:"website_contacts,omitempty"`
+	WebsiteBusinessSignals []string `json:"website_business_signals,omitempty"`
+	LocationHints          []string `json:"location_hints,omitempty"`
+	ReclameAquiTopics      []string `json:"reclame_aqui_topics,omitempty"`
+	ReclameAquiComplaints  []string `json:"reclame_aqui_recent_complaints,omitempty"`
 
 	PrimaryPainPoint string `json:"-"`
 }
@@ -323,17 +379,42 @@ type compactIntelligenceForMessage struct {
 func buildCompactIntelligenceForMessage(intel db.CompanyIntelligence) compactIntelligenceForMessage {
 	pains := parseJSONStringArray(intel.PainPoints)
 	tech := parseJSONStringArray(intel.TechStack)
+	rawWeb := parseRawWebPayload(intel.RawWebData)
+	websiteIssues := make([]string, 0, len(rawWeb.Website.Issues)+len(rawWeb.Derived.SiteIssues))
+	websiteIssues = append(websiteIssues, rawWeb.Derived.SiteIssues...)
+	for _, issue := range rawWeb.Website.Issues {
+		if msg := strings.TrimSpace(issue.Message); msg != "" {
+			websiteIssues = append(websiteIssues, msg)
+		}
+	}
+	websiteContacts := dedupeNonEmptyStrings(append(
+		append(rawWeb.Website.ContactSignals.Emails, rawWeb.Website.ContactSignals.Phones...),
+		rawWeb.Website.ContactSignals.WhatsAppNumbers...,
+	))
+	websiteBusiness := dedupeNonEmptyStrings(append(rawWeb.Derived.WhatCompanyDoes, rawWeb.Website.BusinessSignals.WhatCompanyDoes...))
+	locationHints := dedupeNonEmptyStrings(append(
+		append(rawWeb.Derived.LocationHints, rawWeb.Website.BusinessSignals.LocationHints...),
+		rawWeb.Website.ContactSignals.Addresses...,
+	))
+	reclameTopics := dedupeNonEmptyStrings(rawWeb.ReclameAqui.ComplaintTopics)
+	recentComplaints := dedupeNonEmptyStrings(rawWeb.ReclameAqui.RecentComplaints)
 
 	return compactIntelligenceForMessage{
-		Summary:          intel.Summary,
-		PainPoints:       pains,
-		FitScore:         intel.FitScore,
-		FitJustification: intel.FitJustification,
-		TechStack:        tech,
-		Reputation:       intel.ReputationSummary,
-		Website:          intel.WebsiteDescription,
-		LinkedIn:         intel.LinkedInAbout,
-		PrimaryPainPoint: selectPrimaryPainPoint(pains),
+		Summary:                intel.Summary,
+		PainPoints:             pains,
+		FitScore:               intel.FitScore,
+		FitJustification:       intel.FitJustification,
+		TechStack:              tech,
+		Reputation:             intel.ReputationSummary,
+		Website:                intel.WebsiteDescription,
+		LinkedIn:               intel.LinkedInAbout,
+		WebsiteIssues:          websiteIssues,
+		WebsiteContacts:        websiteContacts,
+		WebsiteBusinessSignals: websiteBusiness,
+		LocationHints:          locationHints,
+		ReclameAquiTopics:      reclameTopics,
+		ReclameAquiComplaints:  recentComplaints,
+		PrimaryPainPoint:       selectPrimaryPainPoint(append(pains, websiteIssues...)),
 	}
 }
 
@@ -431,3 +512,360 @@ func isGroundedMessageResult(result ai.MessageResult, companyName string, intel 
 	return true
 }
 
+const aiWebsiteNarrativeSystemPrompt = `Voce e um analista de inteligencia comercial no Brasil.
+Seu trabalho e transformar evidencias brutas de website em uma descricao coesa sobre a empresa.
+Use apenas as evidencias fornecidas. Nao invente fatos.
+Ignore textos de erro (404), menus repetidos, cookies, placeholders e links tecnicos.
+Retorne somente JSON valido.`
+
+type aiWebsiteNarrativeResult struct {
+	AboutCompany   string   `json:"about_company"`
+	WhatCompany    []string `json:"what_company_does"`
+	CoreOffers     []string `json:"core_offers"`
+	LocationHints  []string `json:"location_hints"`
+	PainHypotheses []string `json:"pain_hypotheses"`
+	Confidence     int      `json:"confidence"`
+}
+
+func (w *aiWorker) enrichWebsiteNarrativeWithAI(ctx context.Context, company db.Company, intel db.CompanyIntelligence) (db.CompanyIntelligence, error) {
+	if w.aiClient == nil || strings.TrimSpace(w.cfg.OpenAIAPIKey) == "" {
+		return intel, nil
+	}
+
+	rawWeb := parseRawWebPayload(intel.RawWebData)
+	evidence := buildWebsiteEvidenceForAI(rawWeb)
+	if len(evidence) == 0 {
+		return intel, nil
+	}
+
+	evidenceJSON, err := json.Marshal(evidence)
+	if err != nil {
+		return intel, fmt.Errorf("marshal website evidence: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`Gere um JSON com a estrutura exata abaixo:
+{
+  "about_company": "string (2-4 frases, coesa, explicando o que a empresa faz, para quem e contexto operacional)",
+  "what_company_does": ["string curta"],
+  "core_offers": ["string curta"],
+  "location_hints": ["string"],
+  "pain_hypotheses": ["string objetiva, baseada apenas em evidencia"],
+  "confidence": 0
+}
+
+Regras:
+- Nao citar informacao sem evidencia direta.
+- Nao repetir menu de navegacao ou texto de erro.
+- Se evidencia for fraca, reduza confidence.
+- about_company deve ser natural e conectada, sem frases soltas.
+- confidence deve ser inteiro entre 0 e 100.
+
+Empresa: %s
+Nicho: %s
+Evidencias brutas (JSON):
+%s`,
+		company.Name,
+		strings.TrimSpace(ptrToString(company.Niche)),
+		string(evidenceJSON),
+	)
+
+	aiCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	raw, err := w.aiClient.Complete(aiCtx, aiWebsiteNarrativeSystemPrompt, prompt)
+	if err != nil {
+		return intel, fmt.Errorf("ai completion website narrative: %w", err)
+	}
+
+	result, err := parseAIWebsiteNarrativeResult(raw)
+	if err != nil {
+		return intel, fmt.Errorf("parse website narrative: %w", err)
+	}
+
+	if isLowQualityWebsiteNarrative(result.AboutCompany) {
+		return intel, nil
+	}
+
+	mergedRaw, err := mergeAIWebsiteNarrativeIntoRaw(intel.RawWebData, result)
+	if err != nil {
+		return intel, fmt.Errorf("merge website narrative in raw data: %w", err)
+	}
+
+	intel.RawWebData = mergedRaw
+	intel.WebsiteDescription = strIfNotEmpty(result.AboutCompany)
+	return intel, nil
+}
+
+func buildWebsiteEvidenceForAI(rawWeb rawWebPayload) map[string]interface{} {
+	website := rawWeb.Website
+	contentSignals := dedupeNonEmptyStrings(append(
+		append(
+			append(website.TextSamples, website.Headings.H1...),
+			website.Headings.H2...,
+		),
+		website.Headings.H3...,
+	))
+	contentSignals = limitStringSlice(contentSignals, 48)
+
+	businessSignals := dedupeNonEmptyStrings(append(
+		append(
+			append(
+				website.BusinessSignals.WhatCompanyDoes,
+				website.BusinessSignals.ValuePropositions...,
+			),
+			website.BusinessSignals.TargetMarketHints...,
+		),
+		website.BusinessSignals.CTAPhrases...,
+	))
+	businessSignals = limitStringSlice(businessSignals, 24)
+
+	issues := make([]string, 0, len(website.Issues))
+	for _, issue := range website.Issues {
+		msg := strings.TrimSpace(issue.Message)
+		if msg == "" {
+			continue
+		}
+		if sev := strings.TrimSpace(issue.Severity); sev != "" {
+			msg = fmt.Sprintf("[%s] %s", strings.ToUpper(sev), msg)
+		}
+		issues = append(issues, msg)
+	}
+	issues = limitStringSlice(dedupeNonEmptyStrings(issues), 16)
+
+	pageSummaries := make([]map[string]string, 0, len(website.PageSummaries))
+	for _, page := range website.PageSummaries {
+		title := strings.TrimSpace(page.Title)
+		desc := strings.TrimSpace(page.Description)
+		if title == "" && desc == "" {
+			continue
+		}
+		pageSummaries = append(pageSummaries, map[string]string{
+			"url":         strings.TrimSpace(page.URL),
+			"title":       title,
+			"description": desc,
+		})
+		if len(pageSummaries) >= 14 {
+			break
+		}
+	}
+
+	contacts := map[string]interface{}{
+		"emails":        limitStringSlice(website.ContactSignals.Emails, 12),
+		"phones":        limitStringSlice(website.ContactSignals.Phones, 12),
+		"whatsapp":      limitStringSlice(website.ContactSignals.WhatsAppNumbers, 12),
+		"addresses":     limitStringSlice(website.ContactSignals.Addresses, 10),
+		"contact_pages": limitStringSlice(website.ContactSignals.ContactPages, 12),
+	}
+
+	reputation := map[string]interface{}{
+		"topics":            limitStringSlice(rawWeb.ReclameAqui.ComplaintTopics, 8),
+		"recent_complaints": limitStringSlice(rawWeb.ReclameAqui.RecentComplaints, 8),
+	}
+
+	evidence := map[string]interface{}{
+		"website_title":       strings.TrimSpace(website.Title),
+		"website_description": strings.TrimSpace(website.Description),
+		"text_samples":        contentSignals,
+		"business_signals":    businessSignals,
+		"location_hints": limitStringSlice(
+			dedupeNonEmptyStrings(append(
+				append(rawWeb.Derived.LocationHints, website.BusinessSignals.LocationHints...),
+				website.ContactSignals.Addresses...,
+			)),
+			12,
+		),
+		"issues":         issues,
+		"contacts":       contacts,
+		"pages_scanned":  limitStringSlice(website.PagesScanned, 20),
+		"page_summaries": pageSummaries,
+		"reputation":     reputation,
+	}
+
+	hasContent := strings.TrimSpace(website.Title) != "" ||
+		strings.TrimSpace(website.Description) != "" ||
+		len(contentSignals) > 0 ||
+		len(businessSignals) > 0 ||
+		len(pageSummaries) > 0
+	if !hasContent {
+		return map[string]interface{}{}
+	}
+	return evidence
+}
+
+func parseAIWebsiteNarrativeResult(raw string) (aiWebsiteNarrativeResult, error) {
+	var result aiWebsiteNarrativeResult
+	if err := unmarshalWrappedJSONObject(raw, &result); err != nil {
+		return result, err
+	}
+
+	result.AboutCompany = strings.TrimSpace(result.AboutCompany)
+	result.WhatCompany = limitStringSlice(dedupeNonEmptyStrings(result.WhatCompany), 8)
+	result.CoreOffers = limitStringSlice(dedupeNonEmptyStrings(result.CoreOffers), 10)
+	result.LocationHints = limitStringSlice(dedupeNonEmptyStrings(result.LocationHints), 10)
+	result.PainHypotheses = limitStringSlice(dedupeNonEmptyStrings(result.PainHypotheses), 8)
+	if result.Confidence < 0 {
+		result.Confidence = 0
+	}
+	if result.Confidence > 100 {
+		result.Confidence = 100
+	}
+	return result, nil
+}
+
+func isLowQualityWebsiteNarrative(about string) bool {
+	about = strings.TrimSpace(about)
+	if about == "" {
+		return true
+	}
+	if len(strings.Fields(about)) < 12 {
+		return true
+	}
+	lower := strings.ToLower(about)
+	blocked := []string{
+		"404",
+		"page not found",
+		"pagina nao encontrada",
+		"oops",
+		"clique aqui",
+	}
+	for _, b := range blocked {
+		if strings.Contains(lower, b) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeAIWebsiteNarrativeIntoRaw(raw json.RawMessage, result aiWebsiteNarrativeResult) (json.RawMessage, error) {
+	payload := map[string]interface{}{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, err
+		}
+	}
+
+	derived, _ := payload["derived"].(map[string]interface{})
+	if derived == nil {
+		derived = map[string]interface{}{}
+	}
+
+	existingWhat := toStringSliceAny(derived["what_company_does"])
+	derived["what_company_does"] = limitStringSlice(
+		dedupeNonEmptyStrings(append(result.WhatCompany, existingWhat...)),
+		14,
+	)
+
+	existingLocations := toStringSliceAny(derived["location_hints"])
+	derived["location_hints"] = limitStringSlice(
+		dedupeNonEmptyStrings(append(result.LocationHints, existingLocations...)),
+		14,
+	)
+
+	existingPains := toStringSliceAny(derived["pain_signals"])
+	derived["pain_signals"] = limitStringSlice(
+		dedupeNonEmptyStrings(append(existingPains, result.PainHypotheses...)),
+		20,
+	)
+
+	derived["ai_about_company"] = result.AboutCompany
+	derived["ai_what_company_does"] = result.WhatCompany
+	derived["ai_core_offers"] = result.CoreOffers
+	derived["ai_location_hints"] = result.LocationHints
+	derived["ai_pain_hypotheses"] = result.PainHypotheses
+	derived["ai_confidence"] = result.Confidence
+
+	payload["derived"] = derived
+	if strings.TrimSpace(result.AboutCompany) != "" {
+		payload["website_description"] = result.AboutCompany
+	}
+
+	merged, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return merged, nil
+}
+
+func limitStringSlice(items []string, maxItems int) []string {
+	items = dedupeNonEmptyStrings(items)
+	if maxItems <= 0 || len(items) <= maxItems {
+		return items
+	}
+	return items[:maxItems]
+}
+
+func toStringSliceAny(value interface{}) []string {
+	if value == nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case []string:
+		return dedupeNonEmptyStrings(v)
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return dedupeNonEmptyStrings(out)
+	default:
+		return nil
+	}
+}
+
+func unmarshalWrappedJSONObject(raw string, out interface{}) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fmt.Errorf("empty json response")
+	}
+	if err := json.Unmarshal([]byte(raw), out); err == nil {
+		return nil
+	}
+	obj := extractFirstJSONObjectLocal(raw)
+	if obj == "" {
+		return fmt.Errorf("no json object found")
+	}
+	return json.Unmarshal([]byte(obj), out)
+}
+
+func extractFirstJSONObjectLocal(s string) string {
+	start := strings.IndexByte(s, '{')
+	if start < 0 {
+		return ""
+	}
+
+	inString := false
+	escaped := false
+	depth := 0
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
+}

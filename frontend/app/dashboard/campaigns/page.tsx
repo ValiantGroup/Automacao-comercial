@@ -15,6 +15,9 @@ interface Campaign {
   status: string;
   daily_limit: number;
   auto_send: boolean;
+  min_google_reviews: number;
+  max_companies: number;
+  min_ai_score_for_stakeholders: number;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -101,7 +104,7 @@ export default function CampaignsPage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-[#E6EDF3]">{campaign.name}</p>
                   <p className="mt-1 truncate text-xs text-[#9BA7B4]">
-                    {campaign.niche} | {campaign.city} | {campaign.daily_limit}/dia
+                    {campaign.niche} | {campaign.city} | {campaign.daily_limit}/dia | max {campaign.max_companies}
                   </p>
                 </div>
               </div>
@@ -109,6 +112,8 @@ export default function CampaignsPage() {
               <div className="flex items-center gap-2">
                 <span className={`badge ${STATUS_BADGE[campaign.status] || 'badge-neutral'}`}>{campaign.status}</span>
                 {campaign.auto_send && <span className="badge badge-teal">auto</span>}
+                <span className="badge badge-neutral">Google {campaign.min_google_reviews}+</span>
+                <span className="badge badge-neutral">IA {campaign.min_ai_score_for_stakeholders}+</span>
 
                 <button
                   onClick={() => toggleStatus(campaign)}

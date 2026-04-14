@@ -117,9 +117,10 @@ func (w *outreachWorker) Handle(ctx context.Context, t *asynq.Task) error {
 
 	// Emit WebSocket event
 	w.broadcaster("message_sent", map[string]interface{}{
-		"message_id": msgID,
-		"company_id": msg.CompanyID,
-		"channel":    msg.Channel,
+		"message_id":  msgID,
+		"company_id":  msg.CompanyID,
+		"campaign_id": msg.CampaignID,
+		"channel":     msg.Channel,
 	})
 
 	slog.Info("Message sent", "message_id", msgID, "channel", msg.Channel, "company_id", msg.CompanyID)

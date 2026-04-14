@@ -40,7 +40,7 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ['var(--font-manrope)', 'Avenir Next', 'Segoe UI', 'sans-serif'],
+        sans: ['Avenir Next', 'Segoe UI', 'sans-serif'],
       },
       animation: {
         'fade-in': 'fadeIn 400ms ease-out',

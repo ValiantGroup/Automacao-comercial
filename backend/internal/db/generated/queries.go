@@ -102,19 +102,31 @@ type Stakeholder struct {
 }
 
 type Campaign struct {
-	ID              uuid.UUID       `json:"id" db:"id"`
-	Name            string          `json:"name" db:"name"`
-	Niche           string          `json:"niche" db:"niche"`
-	City            string          `json:"city" db:"city"`
-	RadiusKM        int32           `json:"radius_km" db:"radius_km"`
-	Status          string          `json:"status" db:"status"`
-	DailyLimit      int32           `json:"daily_limit" db:"daily_limit"`
-	AutoSend        bool            `json:"auto_send" db:"auto_send"`
-	AIPromptContext string          `json:"ai_prompt_context" db:"ai_prompt_context"`
-	Channels        json.RawMessage `json:"channels" db:"channels"`
-	CreatedBy       uuid.UUID       `json:"created_by" db:"created_by"`
-	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
+	ID                      uuid.UUID       `json:"id" db:"id"`
+	Name                    string          `json:"name" db:"name"`
+	Niche                   string          `json:"niche" db:"niche"`
+	City                    string          `json:"city" db:"city"`
+	RadiusKM                int32           `json:"radius_km" db:"radius_km"`
+	Status                  string          `json:"status" db:"status"`
+	DailyLimit              int32           `json:"daily_limit" db:"daily_limit"`
+	AutoSend                bool            `json:"auto_send" db:"auto_send"`
+	AIPromptContext         string          `json:"ai_prompt_context" db:"ai_prompt_context"`
+	Channels                json.RawMessage `json:"channels" db:"channels"`
+	CreatedBy               uuid.UUID       `json:"created_by" db:"created_by"`
+	MinGoogleReviews        int32           `json:"min_google_reviews" db:"min_google_reviews"`
+	MaxCompanies            int32           `json:"max_companies" db:"max_companies"`
+	MinAIScoreStakeholders  int32           `json:"min_ai_score_for_stakeholders" db:"min_ai_score_for_stakeholders"`
+	SearchTotalFound        int32           `json:"search_total_found" db:"search_total_found"`
+	SearchProcessed         int32           `json:"search_processed" db:"search_processed"`
+	SearchSaved             int32           `json:"search_saved" db:"search_saved"`
+	SearchSkippedLowReviews int32           `json:"search_skipped_low_reviews" db:"search_skipped_low_reviews"`
+	SearchSkippedDuplicate  int32           `json:"search_skipped_duplicate" db:"search_skipped_duplicate"`
+	SearchSkippedType       int32           `json:"search_skipped_type" db:"search_skipped_type"`
+	SearchErrors            int32           `json:"search_errors" db:"search_errors"`
+	SearchLastStartedAt     *time.Time      `json:"search_last_started_at,omitempty" db:"search_last_started_at"`
+	SearchLastFinishedAt    *time.Time      `json:"search_last_finished_at,omitempty" db:"search_last_finished_at"`
+	CreatedAt               time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt               time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type OutreachMessage struct {
@@ -178,27 +190,43 @@ type CreateStakeholderParams struct {
 }
 
 type CreateCampaignParams struct {
-	Name            string
-	Niche           string
-	City            string
-	RadiusKM        int32
-	DailyLimit      int32
-	AutoSend        bool
-	AIPromptContext string
-	Channels        json.RawMessage
-	CreatedBy       uuid.UUID
+	Name                   string
+	Niche                  string
+	City                   string
+	RadiusKM               int32
+	DailyLimit             int32
+	AutoSend               bool
+	AIPromptContext        string
+	Channels               json.RawMessage
+	CreatedBy              uuid.UUID
+	MinGoogleReviews       int32
+	MaxCompanies           int32
+	MinAIScoreStakeholders int32
 }
 
 type UpdateCampaignParams struct {
-	ID              uuid.UUID
-	Name            string
-	Niche           string
-	City            string
-	RadiusKM        int32
-	DailyLimit      int32
-	AutoSend        bool
-	AIPromptContext string
-	Channels        json.RawMessage
+	ID                     uuid.UUID
+	Name                   string
+	Niche                  string
+	City                   string
+	RadiusKM               int32
+	DailyLimit             int32
+	AutoSend               bool
+	AIPromptContext        string
+	Channels               json.RawMessage
+	MinGoogleReviews       int32
+	MaxCompanies           int32
+	MinAIScoreStakeholders int32
+}
+
+type IncrementCampaignSearchCountersParams struct {
+	ID                     uuid.UUID
+	ProcessedDelta         int32
+	SavedDelta             int32
+	SkippedLowReviewsDelta int32
+	SkippedDuplicateDelta  int32
+	SkippedTypeDelta       int32
+	ErrorsDelta            int32
 }
 
 type CreateOutreachMessageParams struct {
@@ -363,14 +391,20 @@ func scanCompanies(rows pgx.Rows) ([]Company, error) {
 // ─── Campaigns ────────────────────────────────────────────────────────────────
 
 func (q *Queries) GetCampaign(ctx context.Context, id uuid.UUID) (Campaign, error) {
-	row := q.db.QueryRow(ctx, `SELECT id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at FROM campaigns WHERE id=$1`, id)
+	row := q.db.QueryRow(ctx, `SELECT id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, min_google_reviews, max_companies, min_ai_score_for_stakeholders, search_total_found, search_processed, search_saved, search_skipped_low_reviews, search_skipped_duplicate, search_skipped_type, search_errors, search_last_started_at, search_last_finished_at, created_at, updated_at FROM campaigns WHERE id=$1`, id)
 	var c Campaign
-	err := row.Scan(&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(
+		&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels,
+		&c.CreatedBy, &c.MinGoogleReviews, &c.MaxCompanies, &c.MinAIScoreStakeholders,
+		&c.SearchTotalFound, &c.SearchProcessed, &c.SearchSaved, &c.SearchSkippedLowReviews, &c.SearchSkippedDuplicate, &c.SearchSkippedType, &c.SearchErrors,
+		&c.SearchLastStartedAt, &c.SearchLastFinishedAt,
+		&c.CreatedAt, &c.UpdatedAt,
+	)
 	return c, err
 }
 
 func (q *Queries) ListCampaigns(ctx context.Context) ([]Campaign, error) {
-	rows, err := q.db.Query(ctx, `SELECT id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at FROM campaigns ORDER BY created_at DESC`)
+	rows, err := q.db.Query(ctx, `SELECT id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, min_google_reviews, max_companies, min_ai_score_for_stakeholders, search_total_found, search_processed, search_saved, search_skipped_low_reviews, search_skipped_duplicate, search_skipped_type, search_errors, search_last_started_at, search_last_finished_at, created_at, updated_at FROM campaigns ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +412,13 @@ func (q *Queries) ListCampaigns(ctx context.Context) ([]Campaign, error) {
 	var campaigns []Campaign
 	for rows.Next() {
 		var c Campaign
-		if err := rows.Scan(&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels,
+			&c.CreatedBy, &c.MinGoogleReviews, &c.MaxCompanies, &c.MinAIScoreStakeholders,
+			&c.SearchTotalFound, &c.SearchProcessed, &c.SearchSaved, &c.SearchSkippedLowReviews, &c.SearchSkippedDuplicate, &c.SearchSkippedType, &c.SearchErrors,
+			&c.SearchLastStartedAt, &c.SearchLastFinishedAt,
+			&c.CreatedAt, &c.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)
@@ -388,28 +428,51 @@ func (q *Queries) ListCampaigns(ctx context.Context) ([]Campaign, error) {
 
 func (q *Queries) CreateCampaign(ctx context.Context, p CreateCampaignParams) (Campaign, error) {
 	row := q.db.QueryRow(ctx,
-		`INSERT INTO campaigns (name, niche, city, radius_km, daily_limit, auto_send, ai_prompt_context, channels, created_by)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at`,
-		p.Name, p.Niche, p.City, p.RadiusKM, p.DailyLimit, p.AutoSend, p.AIPromptContext, p.Channels, p.CreatedBy)
+		`INSERT INTO campaigns (name, niche, city, radius_km, daily_limit, auto_send, ai_prompt_context, channels, created_by, min_google_reviews, max_companies, min_ai_score_for_stakeholders)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, min_google_reviews, max_companies, min_ai_score_for_stakeholders, search_total_found, search_processed, search_saved, search_skipped_low_reviews, search_skipped_duplicate, search_skipped_type, search_errors, search_last_started_at, search_last_finished_at, created_at, updated_at`,
+		p.Name, p.Niche, p.City, p.RadiusKM, p.DailyLimit, p.AutoSend, p.AIPromptContext, p.Channels, p.CreatedBy,
+		p.MinGoogleReviews, p.MaxCompanies, p.MinAIScoreStakeholders)
 	var c Campaign
-	err := row.Scan(&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(
+		&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels,
+		&c.CreatedBy, &c.MinGoogleReviews, &c.MaxCompanies, &c.MinAIScoreStakeholders,
+		&c.SearchTotalFound, &c.SearchProcessed, &c.SearchSaved, &c.SearchSkippedLowReviews, &c.SearchSkippedDuplicate, &c.SearchSkippedType, &c.SearchErrors,
+		&c.SearchLastStartedAt, &c.SearchLastFinishedAt,
+		&c.CreatedAt, &c.UpdatedAt,
+	)
 	return c, err
 }
 
 func (q *Queries) UpdateCampaign(ctx context.Context, p UpdateCampaignParams) (Campaign, error) {
 	row := q.db.QueryRow(ctx,
-		`UPDATE campaigns SET name=$2, niche=$3, city=$4, radius_km=$5, daily_limit=$6, auto_send=$7, ai_prompt_context=$8, channels=$9, updated_at=NOW() WHERE id=$1 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at`,
-		p.ID, p.Name, p.Niche, p.City, p.RadiusKM, p.DailyLimit, p.AutoSend, p.AIPromptContext, p.Channels)
+		`UPDATE campaigns
+		 SET name=$2, niche=$3, city=$4, radius_km=$5, daily_limit=$6, auto_send=$7, ai_prompt_context=$8, channels=$9, min_google_reviews=$10, max_companies=$11, min_ai_score_for_stakeholders=$12, updated_at=NOW()
+		 WHERE id=$1
+		 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, min_google_reviews, max_companies, min_ai_score_for_stakeholders, search_total_found, search_processed, search_saved, search_skipped_low_reviews, search_skipped_duplicate, search_skipped_type, search_errors, search_last_started_at, search_last_finished_at, created_at, updated_at`,
+		p.ID, p.Name, p.Niche, p.City, p.RadiusKM, p.DailyLimit, p.AutoSend, p.AIPromptContext, p.Channels,
+		p.MinGoogleReviews, p.MaxCompanies, p.MinAIScoreStakeholders)
 	var c Campaign
-	err := row.Scan(&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(
+		&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels,
+		&c.CreatedBy, &c.MinGoogleReviews, &c.MaxCompanies, &c.MinAIScoreStakeholders,
+		&c.SearchTotalFound, &c.SearchProcessed, &c.SearchSaved, &c.SearchSkippedLowReviews, &c.SearchSkippedDuplicate, &c.SearchSkippedType, &c.SearchErrors,
+		&c.SearchLastStartedAt, &c.SearchLastFinishedAt,
+		&c.CreatedAt, &c.UpdatedAt,
+	)
 	return c, err
 }
 
 func (q *Queries) UpdateCampaignStatus(ctx context.Context, id uuid.UUID, status string) (Campaign, error) {
-	row := q.db.QueryRow(ctx, `UPDATE campaigns SET status=$2, updated_at=NOW() WHERE id=$1 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, created_at, updated_at`, id, status)
+	row := q.db.QueryRow(ctx, `UPDATE campaigns SET status=$2, updated_at=NOW() WHERE id=$1 RETURNING id, name, niche, city, radius_km, status, daily_limit, auto_send, ai_prompt_context, channels, created_by, min_google_reviews, max_companies, min_ai_score_for_stakeholders, search_total_found, search_processed, search_saved, search_skipped_low_reviews, search_skipped_duplicate, search_skipped_type, search_errors, search_last_started_at, search_last_finished_at, created_at, updated_at`, id, status)
 	var c Campaign
-	err := row.Scan(&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(
+		&c.ID, &c.Name, &c.Niche, &c.City, &c.RadiusKM, &c.Status, &c.DailyLimit, &c.AutoSend, &c.AIPromptContext, &c.Channels,
+		&c.CreatedBy, &c.MinGoogleReviews, &c.MaxCompanies, &c.MinAIScoreStakeholders,
+		&c.SearchTotalFound, &c.SearchProcessed, &c.SearchSaved, &c.SearchSkippedLowReviews, &c.SearchSkippedDuplicate, &c.SearchSkippedType, &c.SearchErrors,
+		&c.SearchLastStartedAt, &c.SearchLastFinishedAt,
+		&c.CreatedAt, &c.UpdatedAt,
+	)
 	return c, err
 }
 
@@ -420,6 +483,54 @@ func (q *Queries) DeleteCampaign(ctx context.Context, id uuid.UUID) error {
 
 func (q *Queries) AddCompanyToCampaign(ctx context.Context, campaignID, companyID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, `INSERT INTO campaign_companies (campaign_id, company_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, campaignID, companyID)
+	return err
+}
+
+func (q *Queries) CountCampaignCompanies(ctx context.Context, campaignID uuid.UUID) (int64, error) {
+	var n int64
+	err := q.db.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_companies WHERE campaign_id = $1`, campaignID).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) CountCampaignAnalyzedCompanies(ctx context.Context, campaignID uuid.UUID) (int64, error) {
+	var n int64
+	err := q.db.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_companies cc JOIN companies c ON c.id = cc.company_id WHERE cc.campaign_id = $1 AND c.ai_score IS NOT NULL`, campaignID).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) CountCampaignStakeholders(ctx context.Context, campaignID uuid.UUID) (int64, error) {
+	var n int64
+	err := q.db.QueryRow(ctx, `SELECT COUNT(*) FROM campaign_companies cc JOIN stakeholders s ON s.company_id = cc.company_id WHERE cc.campaign_id = $1`, campaignID).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) CountCampaignMessages(ctx context.Context, campaignID uuid.UUID) (int64, error) {
+	var n int64
+	err := q.db.QueryRow(ctx, `SELECT COUNT(*) FROM outreach_messages WHERE campaign_id = $1`, campaignID).Scan(&n)
+	return n, err
+}
+
+func (q *Queries) BeginCampaignSearchRun(ctx context.Context, campaignID uuid.UUID, totalFound int32) error {
+	_, err := q.db.Exec(ctx, `UPDATE campaigns SET search_total_found=$2, search_processed=0, search_saved=0, search_skipped_low_reviews=0, search_skipped_duplicate=0, search_skipped_type=0, search_errors=0, search_last_started_at=NOW(), search_last_finished_at=NULL, updated_at=NOW() WHERE id=$1`, campaignID, totalFound)
+	return err
+}
+
+func (q *Queries) IncrementCampaignSearchCounters(ctx context.Context, p IncrementCampaignSearchCountersParams) error {
+	_, err := q.db.Exec(ctx, `UPDATE campaigns
+SET
+  search_processed = search_processed + $2,
+  search_saved = search_saved + $3,
+  search_skipped_low_reviews = search_skipped_low_reviews + $4,
+  search_skipped_duplicate = search_skipped_duplicate + $5,
+  search_skipped_type = search_skipped_type + $6,
+  search_errors = search_errors + $7,
+  updated_at = NOW()
+WHERE id = $1`, p.ID, p.ProcessedDelta, p.SavedDelta, p.SkippedLowReviewsDelta, p.SkippedDuplicateDelta, p.SkippedTypeDelta, p.ErrorsDelta)
+	return err
+}
+
+func (q *Queries) MarkCampaignSearchFinished(ctx context.Context, campaignID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, `UPDATE campaigns SET search_last_finished_at=NOW(), updated_at=NOW() WHERE id=$1`, campaignID)
 	return err
 }
 

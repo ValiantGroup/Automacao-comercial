@@ -38,7 +38,7 @@ func Registry(
 
 	client := asynq.NewClient(redisOpt)
 
-	mw := newMapsWorker(cfg, queries, client)
+	mw := newMapsWorker(cfg, queries, client, broadcaster)
 	lw := newLinkedInWorker(cfg, queries, aiClient, client)
 	ww := newWebWorker(cfg, queries, scraperClient, client)
 	aw := newAIWorker(cfg, queries, aiClient, client, broadcaster)
