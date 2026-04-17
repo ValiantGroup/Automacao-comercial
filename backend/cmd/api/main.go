@@ -17,6 +17,7 @@ import (
 	"github.com/gofiber/websocket/v2"
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/valiant-group/prospector/internal/ai"
@@ -30,6 +31,8 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	_ = godotenv.Load("../.env")
 
 	cfg := config.Load()
 

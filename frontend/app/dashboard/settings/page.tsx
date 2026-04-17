@@ -119,7 +119,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 overflow-y-auto px-6 pb-8 pt-6 md:px-8">
       <header>
         <p className="text-xs font-semibold tracking-[0.16em] text-[#5C6673]">SYSTEM GOVERNANCE</p>
         <h1 className="mt-1 text-2xl font-semibold text-[#E6EDF3]">Configuracoes</h1>

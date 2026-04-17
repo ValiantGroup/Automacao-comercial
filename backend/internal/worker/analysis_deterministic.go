@@ -278,25 +278,28 @@ func buildEvidencePainPoints(ev analysisEvidence) []string {
 
 	if !ev.HasCorporateSite {
 		if ev.HasWebsite {
-			pains = append(pains, "Nao foi validado site institucional proprio; apenas host social/agregador.")
+			pains = append(pains, "seu site pode estar offline por falta de atualização ou manutenção.")
 		} else {
-			pains = append(pains, "Nao foi encontrado website publico validavel.")
+			pains = append(pains, "não encontramos website publico sobre seu negocio.")
 		}
 	}
 
 	if len(ev.TechStack) == 0 {
-		pains = append(pains, "Nao foi identificada stack tecnologica publica.")
+		// pains = append(pains, "Nao foi identificada stack tecnologica publica.")
+		pains = append(pains, "existem sinais de melhoria em seu site o que pode deixa-lo mais atrativo para clientes e parceiros.")
 	}
 
 	if ev.StakeholderCount == 0 {
-		pains = append(pains, "Nao ha stakeholders com contato validado.")
+		//pains = append(pains, "Nao ha stakeholders com contato validado.")
+		pains = append(pains, "seus cliente podem não estar conseguindo entrar em contato.")
 	}
 	if !ev.HasContactChannels {
-		pains = append(pains, "Nao foram detectados canais de contato claros no website.")
+		//pains = append(pains, "Nao foram detectados canais de contato claros no website.")
+		pains = append(pains, "seus clientes podem estar tendo dificuldade para entrar em contato.")
 	}
 
 	if ev.ReputationScore == nil {
-		pains = append(pains, "Nao foi possivel validar reputacao externa.")
+		pains = append(pains, "não foi possível validar reputação externa.")
 	} else if *ev.ReputationScore < 7 {
 		pains = append(pains, fmt.Sprintf("Reputacao publica abaixo de 7/10 (%.1f).", *ev.ReputationScore))
 	}

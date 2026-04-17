@@ -92,6 +92,7 @@ func (h *SettingsHandler) Diagnostics(c *fiber.Ctx) error {
 		h.checkEvolution,
 		h.checkOpenAI,
 		h.checkGoogleMaps,
+		h.checkN8N,
 		h.checkSendGrid,
 		h.checkApollo,
 	}
@@ -239,6 +240,45 @@ func (h *SettingsHandler) checkGoogleMaps(ctx context.Context) integrationDiagno
 	default:
 		d.Status = "degraded"
 		d.Detail = payload.Status
+	}
+	return d
+}
+
+// checkN8N verifica se o n8n está configurado corretamente.
+func (h *SettingsHandler) checkN8N(ctx context.Context) integrationDiagnostic {
+	d := integrationDiagnostic{
+		Key:       "n8n",
+		Label:     "N8N",
+		CheckedAt: time.Now().UTC(),
+	}
+	apiKey := strings.TrimSpace(h.cfg.N8N_API_KEY)
+	from := strings.TrimSpace(h.cfg.N8N_URL)
+	if apiKey == "" || from == "" {
+		d.Status = "missing_config"
+		d.Detail = "N8N_API_KEY/N8N_URL ausentes"
+		return d
+	}
+	d.Configured = true
+
+	statusCode, _, err := h.doRequest(ctx, http.MethodGet, from+"/healthz", map[string]string{
+		// "Authorization": "Bearer " + apiKey,
+	}, nil)
+	if err != nil {
+		d.Status = "unreachable"
+		d.Detail = err.Error()
+		return d
+	}
+	d.Reachable = true
+	switch statusCode {
+	case 200:
+		d.Status = "ok"
+		d.Detail = "Credenciais validas"
+	case 401, 403:
+		d.Status = "auth_error"
+		d.Detail = fmt.Sprintf("HTTP %d", statusCode)
+	default:
+		d.Status = "degraded"
+		d.Detail = fmt.Sprintf("HTTP %d", statusCode)
 	}
 	return d
 }

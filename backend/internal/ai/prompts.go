@@ -14,7 +14,7 @@ func BuildAnalysisPrompt(params AnalysisParams) string {
 	return fmt.Sprintf(`Analise os dados abaixo sobre uma empresa e retorne SOMENTE um JSON válido com esta estrutura exata:
 {
   "summary": "string (2-3 frases sobre o que a empresa faz)",
-  "pain_points": ["string"],
+  "pain_points": ["string"](problemas que a empresa enfrenta, e que possam ser um gargalo para crescimento, ou que indiquem necessidade de soluções como as que oferecemos. "Não seja genérico, seja específico com base nos dados fornecidos, e se não houver dados suficientes, ofereça consultoria sobre onde encontrar esses dados ou como inferi-los."),
   "fit_score": 0,
   "fit_justification": "string",
   "tech_stack": ["string"],
@@ -63,7 +63,8 @@ Regras OBRIGATÓRIAS:
 - WhatsApp: máximo 300 caracteres, tom direto e humano, NÃO parecer robô, mencione algo específico da empresa
 - Email assunto: máximo 60 caracteres, chame atenção sem ser clickbait
 - Email corpo: máximo 150 palavras, tom profissional mas não formal demais
-- Mencione UMA dor específica identificada, não genérica
+- Mencione UM problema que a empresa enfrenta, e que possam ser um gargalo para crescimento, ou que indiquem necessidade de soluções como as que oferecemos. "Não seja genérico, seja específico com base nos dados fornecidos, e se não houver dados suficientes, ofereça consultoria sobre onde encontrar esses dados ou como inferi-los."
+
 - Posicione como parceiro estratégico, não como fornecedor genérico
 - PROIBIDO: "espero que este e-mail te encontre bem", "gostaria de apresentar", frases clichê
 - Escreva em português do Brasil

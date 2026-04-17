@@ -42,6 +42,10 @@ type Config struct {
 	EvolutionAPIURL string
 	EvolutionAPIKey string
 
+	// N8N (Workflow automation)
+	N8N_URL     string
+	N8N_API_KEY string
+
 	// SendGrid (Email)
 	SendGridAPIKey    string
 	SendGridFromEmail string
@@ -101,6 +105,8 @@ func Load() *Config {
 		HunterAPIKey:         getEnv("HUNTER_API_KEY", ""),
 		EvolutionAPIURL:      getEnv("EVOLUTION_API_URL", "http://localhost:8081"),
 		EvolutionAPIKey:      getEnv("EVOLUTION_API_KEY", ""),
+		N8N_API_KEY:          getEnv("N8N_API_KEY", ""),
+		N8N_URL:              getEnv("N8N_URL", ""),
 		SendGridAPIKey:       getEnv("SENDGRID_API_KEY", ""),
 		SendGridFromEmail:    getEnv("SENDGRID_FROM_EMAIL", ""),
 		PlaywrightSvcURL:     getEnv("PLAYWRIGHT_SVC_URL", "http://localhost:3002"),
@@ -142,6 +148,3 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
-
-
-

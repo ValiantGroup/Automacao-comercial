@@ -83,7 +83,7 @@ export default function DashboardPage() {
   }, [stats]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-y-auto px-6 pb-8 pt-6 md:px-8">
       <section className="card relative overflow-hidden p-6 md:p-7">
         <div className="absolute -right-5 -top-5 w-32 opacity-[0.12] md:w-40">
           <BrandLogo mode="icon" muted />

@@ -1,0 +1,7 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/dashboard/campaigns/page": "app/dashboard/campaigns/page.js",
+  "/dashboard/outreach/page": "app/dashboard/outreach/page.js",
+  "/dashboard/companies/page": "app/dashboard/companies/page.js",
+  "/dashboard/campaigns/[id]/page": "app/dashboard/campaigns/[id]/page.js"
+}

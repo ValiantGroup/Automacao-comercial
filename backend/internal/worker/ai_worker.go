@@ -231,7 +231,7 @@ func (w *aiWorker) HandleGenerate(ctx context.Context, t *asynq.Task) error {
 		slog.Warn("No stakeholder found, using generic contact", "company_id", companyID)
 	}
 
-	stakeholderName := "Responsavel"
+	stakeholderName := "Responsável"
 	stakeholderRole := "Decisor"
 	if stakeholder.Name != "" {
 		stakeholderName = stakeholder.Name
@@ -444,7 +444,7 @@ func buildDeterministicMessageFallback(companyName, stakeholderName, stakeholder
 	}
 
 	whatsApp := fmt.Sprintf(
-		"%s, tudo bem? No diagnostico da %s, identificamos: %s. A Valiant atua na digitalizacao e automacao para reduzir esse impacto. Podemos falar 15 min?",
+		"%s, tudo bem? Estamos entrando em contato com a %s porque vimos que %s. Nós da Valiant Group temos solucões para isso. Podemos falar por 15 min?",
 		stakeholderName, companyName, pain,
 	)
 	if len([]rune(whatsApp)) > 300 {
@@ -459,7 +459,7 @@ func buildDeterministicMessageFallback(companyName, stakeholderName, stakeholder
 	}
 
 	emailBody := fmt.Sprintf(
-		"Ola %s,\n\nNo diagnostico da %s, encontramos um ponto objetivo: %s.\n\nA Valiant implementa automacao e digitalizacao de processos para reduzir retrabalho, tempo de resposta e perda operacional.\n\nSe fizer sentido para sua area (%s), envio um plano inicial de execucao.\n\nAtenciosamente,\nValiant Group",
+		"Ola %s,\n\nEstamos entrando em contato com a %s, porque vimos que %s.\n\nNós da Valiant Group temos solucões para isso e outras oportunidades que podem interessar.\n\nSe fizer sentido para sua area (%s), Podemos marcar um horário para conversarmos sobre?.\n\nAtenciosamente,\nValiant Group",
 		stakeholderName,
 		companyName,
 		pain,

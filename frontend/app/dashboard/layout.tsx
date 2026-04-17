@@ -29,6 +29,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   '/dashboard': { title: 'Operacao Comercial', subtitle: 'Visao consolidada da automacao e da receita em curso.' },
   '/dashboard/companies': { title: 'Pipeline de Empresas', subtitle: 'Controle de cada conta com prioridade, sinais e historico.' },
   '/dashboard/campaigns': { title: 'Maquina de Campanhas', subtitle: 'Orquestracao de execucao com metas e capacidade diaria.' },
+  '/dashboard/campaigns/new': { title: 'Encontrar Empresas', subtitle: 'Visualize empresas que atendem aos criterios de selecao.' },
   '/dashboard/outreach': { title: 'Centro de Aprovacoes', subtitle: 'Validacao final de mensagens com contexto e cadencia.' },
   '/dashboard/settings': { title: 'Governanca do Sistema', subtitle: 'Parametros globais e saude operacional das integracoes.' },
 };
@@ -220,8 +221,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
         </header>
-
-        <main className="relative flex-1 overflow-y-auto px-6 pb-8 pt-6 md:px-8">{children}</main>
+        {/* overflow-y-auto px-6 pb-8 pt-6 md:px-8 */}
+        <main className="relative flex-1 overflow-y-auto">{children}</main>
       </div>
 
       <RealtimeFeed />

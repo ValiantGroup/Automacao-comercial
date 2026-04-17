@@ -61,7 +61,7 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 overflow-y-auto px-6 pb-8 pt-6 md:px-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-[0.16em] text-[#5C6673]">CAMPAIGN CONTROL</p>

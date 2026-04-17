@@ -381,7 +381,7 @@ export default function CompanyDetailPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 space-y-5 overflow-y-auto px-6 pb-8 pt-6 md:px-8">
       <Link
         href="/dashboard/companies"
         className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-[0.1em] text-[#9BA7B4] transition-colors hover:text-[#E6EDF3]"
