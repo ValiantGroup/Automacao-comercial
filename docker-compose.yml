@@ -50,7 +50,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d valiant_prospector"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -116,6 +116,20 @@ services:
       PROXY_URL: ${PROXY_URL:-""}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  prospector-agent:
+    build: ./prospector-agent
+    restart: unless-stopped
+    networks: [valiant_net]
+    ports:
+      - "5010:5010"
+    env_file:
+      - ./prospector-agent/.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5010/graph"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -193,6 +207,7 @@ services:
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY is required}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:?SENDGRID_API_KEY is required}
       PLAYWRIGHT_SVC_URL: http://playwright-svc:3002
+      PROSPECTOR_AGENT_URL: http://prospector-agent:5010
       APOLLO_API_KEY: ${APOLLO_API_KEY}
       HUNTER_API_KEY: ${HUNTER_API_KEY}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
@@ -206,6 +221,8 @@ services:
         condition: service_healthy
       playwright-svc:
         condition: service_healthy
+      prospector-agent:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -216,6 +233,7 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3000}
+      NEXT_PUBLIC_PROSPECTOR_URL: ${NEXT_PUBLIC_PROSPECTOR_URL:-http://localhost:5010}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`${TRAEFIK_APP_HOST:-app.localhost}`)"

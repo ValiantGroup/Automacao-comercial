@@ -166,7 +166,7 @@ interface TimelineItem {
   date: string;
 }
 
-const TABS = ['Visao geral', 'Stakeholders', 'Mensagens', 'Timeline'] as const;
+const TABS = ['Visao geral', 'Stakeholders', 'Mensagens', 'Timeline', 'IA'] as const;
 
 function statusBadgeClass(status: string) {
   if (status === 'sent') return 'badge-success';
@@ -228,6 +228,24 @@ function uniqURLs(values: string[] = []) {
   return Array.from(new Set(values.map((v) => normalizeURLValue(v)).filter(Boolean)));
 }
 
+function buildQuestionPayload(
+  company: Company,
+  intelligence: Intelligence | null,
+  stakeholders: Stakeholder[],
+  messages: Message[],
+) {
+  return JSON.stringify(
+    {
+      company,
+      intelligence,
+      stakeholders,
+      messages,
+    },
+    null,
+    2,
+  );
+}
+
 export default function CompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [company, setCompany] = useState<Company | null>(null);
@@ -236,6 +254,36 @@ export default function CompanyDetailPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const [prospectorData, setProspectorData] = useState<any>(null);
+const [prospectorLoading, setProspectorLoading] = useState(false);
+
+  async function fetchEmpresa(company: Company, intelligence: Intelligence | null, stakeholders: Stakeholder[], messages: Message[]) {
+    const prospectorURL =
+      process.env.NEXT_PUBLIC_PROSPECTOR_URL ||
+      (typeof window !== 'undefined'
+        ? `${window.location.protocol}//${window.location.hostname}:5010`
+        : 'http://localhost:5010');
+
+    const response = await fetch(`${prospectorURL}/ask`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        question: buildQuestionPayload(company, intelligence, stakeholders, messages),
+        personality: "analista",
+        steps: 5,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Erro na API");
+    }
+
+    return response.json();
+  }
+
 
   useEffect(() => {
     if (!id) return;
@@ -251,6 +299,17 @@ export default function CompanyDetailPage() {
         setIntel(intelData);
         setStakeholders(stakeholdersData?.data || []);
         setMessages(messagesData?.data || []);
+
+        setProspectorLoading(true);
+
+        fetchEmpresa(comp, intelData, stakeholdersData?.data || [], messagesData?.data || [])
+          .then((res) => {
+            console.log("Resposta da API de analise:", res);
+            setProspectorData(res);
+          })
+          .catch(console.error)
+          .finally(() => setProspectorLoading(false));
+
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -453,11 +512,10 @@ export default function CompanyDetailPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(index)}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-              activeTab === index
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeTab === index
                 ? 'bg-[linear-gradient(135deg,rgba(58,47,107,0.84)_0%,rgba(26,167,161,0.78)_100%)] text-[#E6EDF3]'
                 : 'text-[#9BA7B4] hover:text-[#E6EDF3]'
-            }`}
+              }`}
           >
             {tab}
           </button>
@@ -857,6 +915,51 @@ export default function CompanyDetailPage() {
               ))}
             </div>
           )}
+        </section>
+      )}
+      {activeTab === 4 && (
+        <section className="space-y-4 animate-fade-in">
+          <div className="card">
+            <h3 className="text-sm font-semibold text-[#E6EDF3]">
+              Analise IA (Prospector)
+            </h3>
+
+            {prospectorLoading && (
+              <p className="text-sm text-[#9BA7B4] mt-2">Gerando análise...</p>
+            )}
+
+            {!prospectorLoading && !prospectorData && (
+              <p className="text-sm text-[#5C6673] mt-2">
+                Nenhuma análise disponível.
+              </p>
+            )}
+
+            {prospectorData && (
+              <div className="mt-3 space-y-4">
+                {/* LOGS */}
+                {prospectorData.logs && (
+                  <div>
+                    <p className="text-xs font-semibold text-[#5C6673] mb-1">LOGS</p>
+                    <div className="bg-black/40 p-2 rounded text-xs text-[#9BA7B4] max-h-40 overflow-auto">
+                      {prospectorData.logs.map((log: string, i: number) => (
+                        <div key={i}>{log}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* OUTPUT FINAL */}
+                {prospectorData.answer && (
+                  <div>
+                    <p className="text-xs font-semibold text-[#5C6673] mb-1">OUTPUT</p>
+                    <pre className="bg-black/40 p-3 rounded text-xs text-[#E6EDF3] overflow-auto">
+                      {JSON.stringify(prospectorData.answer, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </section>
       )}
     </div>
